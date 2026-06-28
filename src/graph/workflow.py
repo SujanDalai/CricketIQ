@@ -31,6 +31,7 @@ from src.graph.nodes import (
     weather_node,
     pitch_node,
     live_match_node,
+    matchup_predictor_node,
     aggregator_node,
 )
 
@@ -42,6 +43,7 @@ _AGENT_NODES = [
     "weather_node",
     "pitch_node",
     "live_match_node",
+    "matchup_predictor_node",
 ]
 
 
@@ -76,6 +78,7 @@ def build_graph():
     builder.add_node("weather_node",     weather_node)
     builder.add_node("pitch_node",       pitch_node)
     builder.add_node("live_match_node",  live_match_node)
+    builder.add_node("matchup_predictor_node", matchup_predictor_node)
     builder.add_node("aggregator_node",  aggregator_node)
 
     # --- Entry point ---

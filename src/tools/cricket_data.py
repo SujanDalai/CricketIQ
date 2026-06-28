@@ -64,7 +64,7 @@ BOWLER_STATS = {
             "ms dhoni":     {"innings": 5, "dismissals": 2, "runs_conceded": 95,  "avg_conceded": 47.5},
         },
     },
-    "james anderson": {
+    "Jofra Archer ": {
         "country": "England",
         "bowling_style": "right-arm swing",
         "speciality": "late swing both ways, seam movement on English pitches",
@@ -106,7 +106,7 @@ BOWLER_STATS = {
             "ms dhoni":     {"innings": 4, "dismissals": 1, "runs_conceded": 80,  "avg_conceded": 80.0},
         },
     },
-    "stuart broad": {
+    "Ben Stokes": {
         "country": "England",
         "bowling_style": "right-arm fast-medium",
         "speciality": "away movement to right-handers, reverse swing with old ball",

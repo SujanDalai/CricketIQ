@@ -17,6 +17,7 @@ AGENT_TO_NODE: dict[str, str] = {
     "WeatherAgent":   "weather_node",
     "PitchAgent":     "pitch_node",
     "LiveMatchAgent": "live_match_node",
+    "MatchupPredictorAgent": "matchup_predictor_node",
 }
 
 

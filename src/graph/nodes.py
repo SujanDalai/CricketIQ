@@ -23,16 +23,18 @@ from src.agents.matchups import MatchupAgent
 from src.agents.weather import WeatherAgent
 from src.agents.pitch import PitchAgent
 from src.agents.live_match import LiveMatchAgent
+from src.agents.matchup_predictor import MatchupPredictorAgent
 
 # ---------------------------------------------------------------------------
 # Agent singletons (instantiated once per process for efficiency)
 # ---------------------------------------------------------------------------
-_cricket_agent    = CricketAgent()
-_bowler_agent     = BowlerAgent()
-_matchup_agent    = MatchupAgent()
-_weather_agent    = WeatherAgent()
-_pitch_agent      = PitchAgent()
-_live_match_agent = LiveMatchAgent()
+_cricket_agent           = CricketAgent()
+_bowler_agent            = BowlerAgent()
+_matchup_agent           = MatchupAgent()
+_weather_agent           = WeatherAgent()
+_pitch_agent             = PitchAgent()
+_live_match_agent        = LiveMatchAgent()
+_matchup_predictor_agent = MatchupPredictorAgent()
 
 _config = Config()
 
@@ -60,19 +62,19 @@ def supervisor_node(state: CricketIQState) -> dict:
                     "You are the supervisor of CricketIQ, a cricket analytics system. "
                     "Given a user query, output ONLY a JSON array of agent name strings. "
                     "Choose from: CricketAgent, BowlerAgent, MatchupAgent, WeatherAgent, "
-                    "PitchAgent, LiveMatchAgent. "
+                    "PitchAgent, LiveMatchAgent, MatchupPredictorAgent. "
                     f"Known batters: {known_batters}. "
                     f"Known bowlers: {known_bowlers}. "
                     f"Known venues: {known_venues}. "
                     "Rules:\n"
                     "- If any batter is mentioned, include CricketAgent.\n"
                     "- If any bowler is mentioned, include BowlerAgent.\n"
-                    "- If both batter and bowler(s) are mentioned, include MatchupAgent.\n"
+                    "- If both batter and bowler(s) are mentioned, include MatchupAgent and MatchupPredictorAgent.\n"
                     "- If a venue is mentioned, include WeatherAgent and PitchAgent.\n"
                     "- If 'live', 'score', 'schedule', or 'upcoming' is in the query, "
                     "  include LiveMatchAgent.\n"
                     "Example for 'Will Kohli score vs Starc at Perth in Test?': "
-                    '["CricketAgent", "BowlerAgent", "MatchupAgent", "WeatherAgent", "PitchAgent"]\n'
+                    '["CricketAgent", "BowlerAgent", "MatchupAgent", "MatchupPredictorAgent", "WeatherAgent", "PitchAgent"]\n'
                     "Output ONLY the JSON array. No explanation."
                 ),
             },
@@ -96,6 +98,7 @@ def supervisor_node(state: CricketIQState) -> dict:
             valid = {
                 "CricketAgent", "BowlerAgent", "MatchupAgent",
                 "WeatherAgent", "PitchAgent", "LiveMatchAgent",
+                "MatchupPredictorAgent",
             }
             planned = [a for a in planned if a in valid]
         else:
@@ -143,6 +146,13 @@ def matchup_node(state: CricketIQState) -> dict:
     result = _matchup_agent.run(state["query"])
     print(f"[MatchupAgent] Done.")
     return {"agent_outputs": {"MatchupAgent": result}}
+
+
+def matchup_predictor_node(state: CricketIQState) -> dict:
+    """Predict batsman success probabilities and metrics against bowler."""
+    result = _matchup_predictor_agent.run(state["query"])
+    print(f"[MatchupPredictorAgent] Done.")
+    return {"agent_outputs": {"MatchupPredictorAgent": result}}
 
 
 def weather_node(state: CricketIQState) -> dict:
@@ -194,6 +204,8 @@ def aggregator_node(state: CricketIQState) -> dict:
         sections.append("2) Which bowler poses the biggest threat and why.")
     if "MatchupAgent" in active_agents:
         sections.append("3) The key matchup to watch.")
+    if "MatchupPredictorAgent" in active_agents:
+        sections.append(f"{len(sections) + 1}) The detailed match dominance and dismissal probabilities with tactical explanation.")
     if "PitchAgent" in active_agents:
         sections.append(f"{len(sections) + 1}) How the pitch surface affects the contest.")
     if "WeatherAgent" in active_agents:
@@ -229,7 +241,22 @@ def aggregator_node(state: CricketIQState) -> dict:
     print(f"[Aggregator] Report generated.")
 
     separator = "=" * 60
-    report = f"""
+    predictor_output = agent_outputs.get("MatchupPredictorAgent", "")
+    
+    if predictor_output:
+        report = f"""
+{separator}
+  CRICKETIQ FINAL REPORT
+{separator}
+
+{final}
+
+{predictor_output}
+
+{separator}
+"""
+    else:
+        report = f"""
 {separator}
   CRICKETIQ FINAL REPORT
 {separator}

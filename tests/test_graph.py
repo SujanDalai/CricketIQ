@@ -8,6 +8,7 @@ Covers:
 - Router fan-out logic
 """
 
+# pyrefly: ignore [missing-import]
 import pytest
 from unittest.mock import patch, MagicMock
 
