@@ -5,11 +5,11 @@ PLAYER_STATS = {
         "format": "all",
         "batting_style": "right-handed",
         "recent_matches": [
-            {"runs": 54, "format": "ODI",  "opposition": "Australia", "venue": "Mumbai",  "result": "win",  "vs_bowler": "mitchell starc"},
-            {"runs": 82, "format": "T20",  "opposition": "England",   "venue": "Delhi",   "result": "win",  "vs_bowler": "james anderson"},
-            {"runs": 42, "format": "Test", "opposition": "Australia", "venue": "Perth",   "result": "loss", "vs_bowler": "mitchell starc"},
-            {"runs": 67, "format": "ODI",  "opposition": "England",   "venue": "London",  "result": "win",  "vs_bowler": "stuart broad"},
-            {"runs": 39, "format": "T20",  "opposition": "Australia", "venue": "Sydney",  "result": "loss", "vs_bowler": "pat cummins"},
+            {"runs": 57, "format": "ODI",  "opposition": "Australia", "venue": "Mumbai",  "result": "win",  "vs_bowler": "mitchell starc"},
+            {"runs": 89, "format": "T20",  "opposition": "England",   "venue": "Delhi",   "result": "win",  "vs_bowler": "james anderson"},
+            {"runs": 98, "format": "Test", "opposition": "Australia", "venue": "Perth",   "result": "loss", "vs_bowler": "mitchell starc"},
+            {"runs": 96, "format": "ODI",  "opposition": "England",   "venue": "London",  "result": "win",  "vs_bowler": "stuart broad"},
+            {"runs": 49, "format": "T20",  "opposition": "Australia", "venue": "Sydney",  "result": "loss", "vs_bowler": "pat cummins"},
         ],
         "weaknesses": ["left-arm pace outside off stump", "moving ball early in Test innings"],
         "strengths":  ["chase situations", "ODI middle overs", "cover drive"],
@@ -19,13 +19,26 @@ PLAYER_STATS = {
         "batting_style": "right-handed",
         "recent_matches": [
             {"runs": 72, "format": "ODI",  "opposition": "England",   "venue": "Mumbai", "result": "win",  "vs_bowler": "james anderson"},
-            {"runs": 31, "format": "T20",  "opposition": "Australia", "venue": "Sydney", "result": "loss", "vs_bowler": "pat cummins"},
+            {"runs": 64, "format": "T20",  "opposition": "Australia", "venue": "Sydney", "result": "loss", "vs_bowler": "pat cummins"},
             {"runs": 55, "format": "Test", "opposition": "England",   "venue": "Lord's", "result": "win",  "vs_bowler": "stuart broad"},
             {"runs": 90, "format": "ODI",  "opposition": "Australia", "venue": "Mumbai", "result": "win",  "vs_bowler": "mitchell starc"},
-            {"runs": 18, "format": "T20",  "opposition": "England",   "venue": "London", "result": "loss", "vs_bowler": "stuart broad"},
+            {"runs": 48, "format": "T20",  "opposition": "England",   "venue": "London", "result": "loss", "vs_bowler": "stuart broad"},
         ],
-        "weaknesses": ["short-pitched deliveries", "bounce outside off stump in T20s"],
+        "weaknesses": ["yorker deliveries", "bounce outside off stump in T20s"],
         "strengths":  ["powerplay ODI", "pull shot", "home conditions"],
+    },
+    "ms dhoni": {
+        "format": "all",
+        "batting_style": "right-handed",
+        "recent_matches": [
+            {"runs": 91, "format": "ODI",  "opposition": "Australia", "venue": "Sydney", "result": "win",  "vs_bowler": "pat cummins"},
+            {"runs": 57, "format": "ODI",  "opposition": "England",   "venue": "London", "result": "win",  "vs_bowler": "james anderson"},
+            {"runs": 61, "format": "Test", "opposition": "England",   "venue": "Lord's", "result": "loss", "vs_bowler": "stuart broad"},
+            {"runs": 46, "format": "T20",  "opposition": "Australia", "venue": "Melbourne", "result": "loss", "vs_bowler": "mitchell starc"},
+            {"runs": 84, "format": "T20",  "opposition": "England",   "venue": "Birmingham", "result": "win",  "vs_bowler": "stuart broad"},
+        ],
+        "weaknesses": ["wide short balls", "spin bowling"],
+        "strengths":  ["yorkers and the iconic helicopter shot", "huge power ability to hit all around the park"],
     },
 }
 
@@ -48,6 +61,7 @@ BOWLER_STATS = {
         "head_to_head": {
             "virat kohli":  {"innings": 8, "dismissals": 4, "runs_conceded": 187, "avg_conceded": 46.75},
             "rohit sharma": {"innings": 6, "dismissals": 2, "runs_conceded": 201, "avg_conceded": 100.5},
+            "ms dhoni":     {"innings": 5, "dismissals": 2, "runs_conceded": 95,  "avg_conceded": 47.5},
         },
     },
     "james anderson": {
@@ -68,6 +82,7 @@ BOWLER_STATS = {
         "head_to_head": {
             "virat kohli":  {"innings": 10, "dismissals": 7, "runs_conceded": 134, "avg_conceded": 19.14},
             "rohit sharma": {"innings": 8,  "dismissals": 3, "runs_conceded": 198, "avg_conceded": 66.0},
+            "ms dhoni":     {"innings": 6,  "dismissals": 3, "runs_conceded": 110, "avg_conceded": 36.67},
         },
     },
     "pat cummins": {
@@ -88,6 +103,7 @@ BOWLER_STATS = {
         "head_to_head": {
             "virat kohli":  {"innings": 7, "dismissals": 2, "runs_conceded": 210, "avg_conceded": 105.0},
             "rohit sharma": {"innings": 6, "dismissals": 4, "runs_conceded": 98,  "avg_conceded": 24.5},
+            "ms dhoni":     {"innings": 4, "dismissals": 1, "runs_conceded": 80,  "avg_conceded": 80.0},
         },
     },
     "stuart broad": {
@@ -108,6 +124,7 @@ BOWLER_STATS = {
         "head_to_head": {
             "virat kohli":  {"innings": 9, "dismissals": 3, "runs_conceded": 245, "avg_conceded": 81.67},
             "rohit sharma": {"innings": 7, "dismissals": 5, "runs_conceded": 112, "avg_conceded": 22.4},
+            "ms dhoni":     {"innings": 5, "dismissals": 2, "runs_conceded": 90,  "avg_conceded": 45.0},
         },
     },
 }

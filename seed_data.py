@@ -7,6 +7,7 @@ def seed_database():
     players = [
         ("virat kohli", "batter", None, "right-handed", None, None),
         ("rohit sharma", "batter", None, "right-handed", None, None),
+        ("ms dhoni", "batter", None, "right-handed", None, None),
         ("mitchell starc", "bowler", "Australia", None, "left-arm fast", "inswing yorker, left-arm angle outside off to right-handers"),
         ("james anderson", "bowler", "England", None, "right-arm swing", "late swing both ways, seam movement on English pitches"),
         ("pat cummins", "bowler", "Australia", None, "right-arm fast", "steep bounce, seam movement, relentless line and length"),
@@ -29,6 +30,11 @@ def seed_database():
         ("rohit sharma", "strength", "powerplay ODI"),
         ("rohit sharma", "strength", "pull shot"),
         ("rohit sharma", "strength", "home conditions"),
+
+        ("ms dhoni", "weakness", "wide short balls"),
+        ("ms dhoni", "weakness", "spin bowling"),
+        ("ms dhoni", "strength", "yorkers and the iconic helicopter shot"),
+        ("ms dhoni", "strength", "huge power ability to hit all around the park"),
 
         ("mitchell starc", "strength", "new ball swing"),
         ("mitchell starc", "strength", "death yorkers"),
@@ -73,6 +79,12 @@ def seed_database():
         ("rohit sharma", 55, "Test", "England", "Lord's", "win", "stuart broad"),
         ("rohit sharma", 90, "ODI", "Australia", "Mumbai", "win", "mitchell starc"),
         ("rohit sharma", 18, "T20", "England", "London", "loss", "stuart broad"),
+
+        ("ms dhoni", 91, "ODI", "Australia", "Sydney", "win", "pat cummins"),
+        ("ms dhoni", 57, "ODI", "England", "London", "win", "james anderson"),
+        ("ms dhoni", 61, "Test", "England", "Lord's", "loss", "stuart broad"),
+        ("ms dhoni", 46, "T20", "Australia", "Melbourne", "loss", "mitchell starc"),
+        ("ms dhoni", 84, "T20", "England", "Birmingham", "win", "stuart broad"),
     ]
     cursor.executemany(
         "INSERT INTO batting_innings (batter_name, runs, format, opposition, venue, result, vs_bowler) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -140,6 +152,10 @@ def seed_database():
         ("rohit sharma", "pat cummins", 6, 4, 98, 24.5),
         ("virat kohli", "stuart broad", 9, 3, 245, 81.67),
         ("rohit sharma", "stuart broad", 7, 5, 112, 22.4),
+        ("ms dhoni", "mitchell starc", 5, 2, 95, 47.5),
+        ("ms dhoni", "james anderson", 6, 3, 110, 36.67),
+        ("ms dhoni", "pat cummins", 4, 1, 80, 80.0),
+        ("ms dhoni", "stuart broad", 5, 2, 90, 45.0),
     ]
     cursor.executemany(
         "INSERT INTO head_to_head (batter_name, bowler_name, innings, dismissals, runs_conceded, avg_conceded) VALUES (?, ?, ?, ?, ?, ?)",
