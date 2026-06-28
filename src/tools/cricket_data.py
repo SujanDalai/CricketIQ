@@ -7,7 +7,7 @@ PLAYER_STATS = {
         "recent_matches": [
             {"runs": 54, "format": "ODI",  "opposition": "Australia", "venue": "Mumbai",  "result": "win",  "vs_bowler": "mitchell starc"},
             {"runs": 82, "format": "T20",  "opposition": "England",   "venue": "Delhi",   "result": "win",  "vs_bowler": "james anderson"},
-            {"runs": 13, "format": "Test", "opposition": "Australia", "venue": "Perth",   "result": "loss", "vs_bowler": "mitchell starc"},
+            {"runs": 42, "format": "Test", "opposition": "Australia", "venue": "Perth",   "result": "loss", "vs_bowler": "mitchell starc"},
             {"runs": 67, "format": "ODI",  "opposition": "England",   "venue": "London",  "result": "win",  "vs_bowler": "stuart broad"},
             {"runs": 39, "format": "T20",  "opposition": "Australia", "venue": "Sydney",  "result": "loss", "vs_bowler": "pat cummins"},
         ],
