@@ -1,6 +1,6 @@
 import ollama
 from src.agents.base import BaseAgent
-from src.tools.cricket_data import BOWLER_STATS
+from src.tools.cricket_data import BOWLER_STATS, resolve_bowlers
 from src.config import Config
 
 
@@ -87,22 +87,11 @@ class BowlerAgent(BaseAgent):
             "edge": edge,
         }
 
-    def run(self, task: str) -> str:
+    def _run_single(self, bowler_name: str, task_lower: str) -> str:
         """
-        Analyze a bowler's stats. Optionally include batter name for H2H.
+        Run analysis for a single resolved bowler name.
+        Internal helper used by run() for both single and group queries.
         """
-        task_lower = task.lower()
-
-        # Find bowler
-        bowler_name = None
-        for name in BOWLER_STATS.keys():
-            if name in task_lower:
-                bowler_name = name
-                break
-
-        if not bowler_name:
-            return "BowlerAgent: Could not identify bowler in task."
-
         stats = self._compute_bowling_rating(bowler_name)
         if "error" in stats:
             return f"BowlerAgent Error: {stats['error']}"
@@ -172,3 +161,18 @@ Weaknesses        : {', '.join(stats['weaknesses'])}
 ANALYST VERDICT:
 {llm_analysis}
 """
+
+    def run(self, task: str) -> str:
+        """
+        Analyze a bowler's stats. Optionally include batter name for H2H.
+        Supports nationality groups: 'australian', 'english', 'australia', 'england'.
+        """
+        task_lower = task.lower()
+
+        # Resolve bowler(s) — handles group keywords (e.g. "australian bowlers")
+        # as well as individual names. Returns at least one name.
+        resolved = resolve_bowlers(task_lower)
+
+        # Run analysis for each resolved bowler and concatenate results
+        outputs = [self._run_single(bowler_name, task_lower) for bowler_name in resolved]
+        return "\n\n".join(outputs)

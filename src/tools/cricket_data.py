@@ -122,3 +122,57 @@ PITCH_CONDITIONS = {
     "delhi":      {"pace": "low",    "bounce": "low",    "spin": "high",   "swing": "low",   "favours": "spinners and batters"},
     "birmingham": {"pace": "medium", "bounce": "medium", "spin": "low",    "swing": "high",  "favours": "swing bowlers"},
 }
+
+# ---------------------------------------------------------------------------
+# Bowler groups by nationality
+# ---------------------------------------------------------------------------
+BOWLER_GROUPS = {
+    "australian": ["mitchell starc", "pat cummins"],
+    "australia":  ["mitchell starc", "pat cummins"],
+    "english":    ["james anderson", "stuart broad"],
+    "england":    ["james anderson", "stuart broad"],
+}
+
+
+def resolve_bowlers(text: str) -> list[str]:
+    """
+    Given a query string, return a list of individual bowler names to analyse.
+
+    Resolution order:
+    1. If one or more nationality group keywords are detected
+       (e.g. "australian", "english"), expand them to their member bowlers.
+    2. If specific bowler names are mentioned, use those.
+    3. If nothing is found, return all known bowlers as a fallback.
+
+    Examples
+    --------
+    >>> resolve_bowlers("how will kohli bat against australian bowlers?")
+    ['mitchell starc', 'pat cummins']
+
+    >>> resolve_bowlers("analysis for james anderson vs kohli")
+    ['james anderson']
+
+    >>> resolve_bowlers("general analysis")
+    ['mitchell starc', 'james anderson', 'pat cummins', 'stuart broad']
+    """
+    text_lower = text.lower()
+    found: list[str] = []
+
+    # 1. Check for group keywords first
+    for keyword, members in BOWLER_GROUPS.items():
+        if keyword in text_lower:
+            for bowler in members:
+                if bowler not in found:
+                    found.append(bowler)
+
+    # 2. Also pick up any individually named bowlers
+    for bowler in BOWLER_STATS:
+        if bowler in text_lower and bowler not in found:
+            found.append(bowler)
+
+    # 3. Fallback: all bowlers
+    if not found:
+        found = list(BOWLER_STATS.keys())
+
+    return found
+
