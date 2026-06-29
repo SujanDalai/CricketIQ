@@ -13,6 +13,76 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# ====================================================================
+# 🎬 STARTUP SPLASH SCREEN ANIMATION
+# ====================================================================
+st.markdown("""
+    <style>
+    /* Splash Screen Overlay Container */
+    #splash-screen {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background-color: #0a0c12; /* Matches your dashboard background tint */
+        z-index: 999999;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        animation: fadeOut 0.8s ease-in-out forwards;
+        animation-delay: 2.2s; /* How long the splash screen stays visible */
+        pointer-events: none;
+    }
+
+    /* Big Animated Text */
+    .splash-logo {
+        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        font-size: 4rem;
+        font-weight: 800;
+        color: #ffffff;
+        letter-spacing: 2px;
+        opacity: 0;
+        transform: scale(0.8);
+        animation: zoomIn 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    /* Logo Accent Dot */
+    .splash-logo span {
+        color: #ff4b4b; /* Vibrant crimson match color */
+    }
+
+    /* Keyframes for the text intro */
+    @keyframes zoomIn {
+        0% {
+            opacity: 0;
+            transform: scale(0.85);
+            filter: blur(10px);
+        }
+        100% {
+            opacity: 1;
+            transform: scale(1);
+            filter: blur(0px);
+        }
+    }
+
+    /* Keyframes to smoothly fade out the backdrop */
+    @keyframes fadeOut {
+        0% {
+            opacity: 1;
+        }
+        100% {
+            opacity: 0;
+            visibility: hidden;
+        }
+    }
+    </style>
+
+    <div id="splash-screen">
+        <div class="splash-logo">🏏 CricketIQ<span>.</span></div>
+    </div>
+""", unsafe_allow_html=True)
+
 # Initialize Session State variables to prevent duplication bugs on hot-reloads
 if "current_report" not in st.session_state:
     st.session_state.current_report = ""
