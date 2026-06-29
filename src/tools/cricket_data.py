@@ -6,9 +6,9 @@ PLAYER_STATS = {
         "batting_style": "right-handed",
         "recent_matches": [
             {"runs": 57, "format": "ODI",  "opposition": "Australia", "venue": "Mumbai",  "result": "win",  "vs_bowler": "mitchell starc"},
-            {"runs": 89, "format": "T20",  "opposition": "England",   "venue": "Delhi",   "result": "win",  "vs_bowler": "james anderson"},
+            {"runs": 89, "format": "T20",  "opposition": "England",   "venue": "Delhi",   "result": "win",  "vs_bowler": "ben stokes"},
             {"runs": 98, "format": "Test", "opposition": "Australia", "venue": "Perth",   "result": "loss", "vs_bowler": "mitchell starc"},
-            {"runs": 96, "format": "ODI",  "opposition": "England",   "venue": "London",  "result": "win",  "vs_bowler": "stuart broad"},
+            {"runs": 96, "format": "ODI",  "opposition": "England",   "venue": "London",  "result": "win",  "vs_bowler": "jofra archer"},
             {"runs": 49, "format": "T20",  "opposition": "Australia", "venue": "Sydney",  "result": "loss", "vs_bowler": "pat cummins"},
         ],
         "weaknesses": ["left-arm pace outside off stump", "moving ball early in Test innings"],
@@ -18,11 +18,11 @@ PLAYER_STATS = {
         "format": "all",
         "batting_style": "right-handed",
         "recent_matches": [
-            {"runs": 72, "format": "ODI",  "opposition": "England",   "venue": "Mumbai", "result": "win",  "vs_bowler": "james anderson"},
+            {"runs": 72, "format": "ODI",  "opposition": "England",   "venue": "Mumbai", "result": "win",  "vs_bowler": "ben stokes"},
             {"runs": 64, "format": "T20",  "opposition": "Australia", "venue": "Sydney", "result": "loss", "vs_bowler": "pat cummins"},
-            {"runs": 55, "format": "Test", "opposition": "England",   "venue": "Lord's", "result": "win",  "vs_bowler": "stuart broad"},
+            {"runs": 55, "format": "Test", "opposition": "England",   "venue": "Lord's", "result": "win",  "vs_bowler": "jofra archer"},
             {"runs": 90, "format": "ODI",  "opposition": "Australia", "venue": "Mumbai", "result": "win",  "vs_bowler": "mitchell starc"},
-            {"runs": 48, "format": "T20",  "opposition": "England",   "venue": "London", "result": "loss", "vs_bowler": "stuart broad"},
+            {"runs": 48, "format": "T20",  "opposition": "England",   "venue": "London", "result": "loss", "vs_bowler": "jofra archer"},
         ],
         "weaknesses": ["yorker deliveries", "bounce outside off stump in T20s"],
         "strengths":  ["powerplay ODI", "pull shot", "home conditions"],
@@ -32,10 +32,10 @@ PLAYER_STATS = {
         "batting_style": "right-handed",
         "recent_matches": [
             {"runs": 91, "format": "ODI",  "opposition": "Australia", "venue": "Sydney", "result": "win",  "vs_bowler": "pat cummins"},
-            {"runs": 57, "format": "ODI",  "opposition": "England",   "venue": "London", "result": "win",  "vs_bowler": "james anderson"},
-            {"runs": 61, "format": "Test", "opposition": "England",   "venue": "Lord's", "result": "loss", "vs_bowler": "stuart broad"},
+            {"runs": 57, "format": "ODI",  "opposition": "England",   "venue": "London", "result": "win",  "vs_bowler": "ben stokes"},
+            {"runs": 61, "format": "Test", "opposition": "England",   "venue": "Lord's", "result": "loss", "vs_bowler": "jofra archer"},
             {"runs": 46, "format": "T20",  "opposition": "Australia", "venue": "Melbourne", "result": "loss", "vs_bowler": "mitchell starc"},
-            {"runs": 84, "format": "T20",  "opposition": "England",   "venue": "Birmingham", "result": "win",  "vs_bowler": "stuart broad"},
+            {"runs": 84, "format": "T20",  "opposition": "England",   "venue": "Birmingham", "result": "win",  "vs_bowler": "jofra archer"},
         ],
         "weaknesses": ["wide short balls", "spin bowling"],
         "strengths":  ["yorkers and the iconic helicopter shot", "huge power ability to hit all around the park"],
@@ -64,7 +64,7 @@ BOWLER_STATS = {
             "ms dhoni":     {"innings": 5, "dismissals": 2, "runs_conceded": 95,  "avg_conceded": 47.5},
         },
     },
-    "Jofra Archer ": {
+    "ben stokes": {
         "country": "England",
         "bowling_style": "right-arm swing",
         "speciality": "late swing both ways, seam movement on English pitches",
@@ -106,7 +106,7 @@ BOWLER_STATS = {
             "ms dhoni":     {"innings": 4, "dismissals": 1, "runs_conceded": 80,  "avg_conceded": 80.0},
         },
     },
-    "Ben Stokes": {
+    "jofra archer": {
         "country": "England",
         "bowling_style": "right-arm fast-medium",
         "speciality": "away movement to right-handers, reverse swing with old ball",
@@ -146,8 +146,8 @@ PITCH_CONDITIONS = {
 BOWLER_GROUPS = {
     "australian": ["mitchell starc", "pat cummins"],
     "australia":  ["mitchell starc", "pat cummins"],
-    "english":    ["james anderson", "stuart broad"],
-    "england":    ["james anderson", "stuart broad"],
+    "english":    ["ben stokes", "jofra archer"],
+    "england":    ["ben stokes", "jofra archer"],
 }
 
 
@@ -166,11 +166,11 @@ def resolve_bowlers(text: str) -> list[str]:
     >>> resolve_bowlers("how will kohli bat against australian bowlers?")
     ['mitchell starc', 'pat cummins']
 
-    >>> resolve_bowlers("analysis for james anderson vs kohli")
-    ['james anderson']
+    >>> resolve_bowlers("analysis for ben stokes vs kohli")
+    ['ben stokes']
 
     >>> resolve_bowlers("general analysis")
-    ['mitchell starc', 'james anderson', 'pat cummins', 'stuart broad']
+    ['mitchell starc', 'ben stokes', 'pat cummins', 'jofra archer']
     """
     text_lower = text.lower()
     found: list[str] = []
