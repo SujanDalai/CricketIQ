@@ -70,7 +70,7 @@ async def supervisor_node(state: CricketIQState) -> dict:
         planned.append("PitchAgent")
 
     # Live match detection
-    if any(word in query for word in ["live", "score", "schedule", "upcoming"]):
+    if any(word in query for word in ["live", "score", "schedule", "upcoming", "completed", "recent", "result", "results", "won", "finished", "yesterday"]):
         planned.append("LiveMatchAgent")
 
     print(f"\n[Supervisor] Routing to: {planned}")

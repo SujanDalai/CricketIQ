@@ -66,38 +66,40 @@ class TestRouter:
 # ---------------------------------------------------------------------------
 
 class TestSupervisorNode:
-    @patch("src.graph.nodes.ollama.chat")
-    def test_supervisor_returns_planned_agents(self, mock_chat):
-        mock_chat.return_value = {
-            "message": {"content": '["CricketAgent", "BowlerAgent", "PitchAgent"]'}
-        }
-        state = make_state(query="Will Kohli score vs Starc at Perth?")
+    def test_supervisor_returns_planned_agents(self):
+        # Query with Virat Kohli, Mitchell Starc, and Perth
+        state = make_state(query="Will Virat Kohli score vs Mitchell Starc at Perth?")
         result = asyncio.run(supervisor_node(state))
-
+    
         assert "planned_agents" in result
-        assert "CricketAgent" in result["planned_agents"]
+        planned = result["planned_agents"]
+        assert "CricketAgent" in planned
+        assert "BowlerAgent" in planned
+        assert "MatchupAgent" in planned
+        assert "MatchupPredictorAgent" in planned
+        assert "WeatherAgent" in planned
+        assert "PitchAgent" in planned
+        assert "LiveMatchAgent" in planned  # due to "score"
 
-    @patch("src.graph.nodes.ollama.chat")
-    def test_supervisor_filters_invalid_agents(self, mock_chat):
-        mock_chat.return_value = {
-            "message": {"content": '["CricketAgent", "FakeAgent"]'}
-        }
-        state = make_state(query="test query")
+    def test_supervisor_only_venue(self):
+        # Query with only Mumbai venue
+        state = make_state(query="How is the pitch at Mumbai?")
         result = asyncio.run(supervisor_node(state))
+        
+        assert "planned_agents" in result
+        planned = result["planned_agents"]
+        assert "WeatherAgent" in planned
+        assert "PitchAgent" in planned
+        assert "CricketAgent" not in planned
+        assert "BowlerAgent" not in planned
 
-        assert "FakeAgent" not in result["planned_agents"]
-        assert "CricketAgent" in result["planned_agents"]
-
-    @patch("src.graph.nodes.ollama.chat")
-    def test_supervisor_handles_bad_json(self, mock_chat):
-        mock_chat.return_value = {
-            "message": {"content": "This is not JSON at all"}
-        }
-        state = make_state(query="test")
+    def test_supervisor_empty_query(self):
+        state = make_state(query="general analysis")
         result = asyncio.run(supervisor_node(state))
+        
+        assert "planned_agents" in result
+        assert result["planned_agents"] == []
 
-        # Falls back to CricketAgent
-        assert result["planned_agents"] == ["CricketAgent"]
 
 
 # ---------------------------------------------------------------------------

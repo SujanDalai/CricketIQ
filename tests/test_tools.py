@@ -66,4 +66,55 @@ def test_weather_api(mock_get):
     assert "error" not in result
     assert result["city"] == "London"
     assert result["temperature_c"] == 15.0
-    assert result["condition"] == "Rain"
+    assert result["condition"] == "Rain"
+
+
+@patch("src.tools.cricbuzz.requests.get")
+def test_cricbuzz_scraper(mock_get):
+    from src.tools.cricbuzz import CricbuzzScraper
+    # Mocking the HTTP response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.apparent_encoding = "utf-8"
+    mock_response.text = """
+    <html>
+    <body>
+    <a class="w-full bg-cbWhite flex flex-col p-3 gap-1" href="/live-cricket-scores/129574/nz-vs-eng-3rd-test-new-zealand-tour-of-england-2026" title="New Zealand vs England, 3rd Test ">
+     <div class="flex justify-between items-center">
+      <span class="text-xs text-cbTxtSec dark:text-cbTxtSec w-4/5">
+       3rd Test • Nottingham, Trent Bridge
+      </span>
+     </div>
+     <div class="flex flex-col gap-3 my-2">
+      <div class="flex items-center gap-4 justify-between">
+       <div class="flex items-center gap-2">
+        <span class="text-cbTxtPrim dark:text-cbWhite hidden wb:block truncate">New Zealand</span>
+       </div>
+       <span class="font-medium wb:font-semibold text-cbTxtPrim dark:text-cbWhite w-1/2 truncate">438 &amp; 288-9 d</span>
+      </div>
+      <div class="flex items-center gap-4 justify-between">
+       <div class="flex items-center gap-2">
+        <span class="text-cbTxtSec dark:text-cbTxtSec hidden wb:block truncate">England</span>
+       </div>
+       <span class="font-medium wb:font-semibold text-cbTxtSec dark:text-cbTxtSec w-1/2 truncate">354 &amp; 212</span>
+      </div>
+     </div>
+     <span class="text-cbComplete dark:text-cbCompleteDark">New Zealand won by 160 runs</span>
+    </a>
+    </body>
+    </html>
+    """
+    mock_get.return_value = mock_response
+
+    scraper = CricbuzzScraper()
+    live_scores = scraper.get_live_scores()
+    
+    assert len(live_scores) == 1
+    match = live_scores[0]
+    assert match["name"] == "New Zealand vs England, 3rd Test"
+    assert match["venue"] == "3rd Test - Nottingham, Trent Bridge"
+    assert match["status"] == "New Zealand won by 160 runs"
+    assert match["date"] == "Completed"
+    assert match["teams"] == ["New Zealand", "England"]
+    assert match["score"] == "New Zealand 438 & 288-9 d vs England 354 & 212"
+
