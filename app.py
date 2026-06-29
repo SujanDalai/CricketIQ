@@ -58,7 +58,7 @@ st.markdown("---")
 user_query = st.text_input(
     "Ask CricketIQ:", 
     value="", 
-    placeholder="e.g., Will Rohit Sharma score well vs Mitchell Starc and James Anderson at Lords in Test?"
+    placeholder="e.g., Will Rohit Sharma score well vs Mitchell Starc and Jofra Archer at Lords in Test?"
 )
 
 # 5. Multi-Agent Run processing pipeline
