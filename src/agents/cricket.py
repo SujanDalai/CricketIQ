@@ -1,4 +1,4 @@
-import ollama
+from src.llm.client import invoke_llm
 from src.agents.base import BaseAgent
 from src.tools.cricket_data import PLAYER_STATS
 from src.config import Config
@@ -111,26 +111,15 @@ Format averages: {stats['format_averages']}
 Best score: {stats['best']} | Worst score: {stats['worst']}
 """
 
-        response = ollama.chat(
-            model=self.config.OLLAMA_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a professional cricket analyst. "
-                        "Given the following batting statistics, write a sharp 3-4 sentence analysis. "
-                        "Mention the momentum score, form trend, and one specific insight about format performance. "
-                        "Be direct and analytical, like a TV expert — no fluff."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": stats_summary,
-                },
-            ],
+        llm_analysis = invoke_llm(
+            system_prompt=(
+                "You are a professional cricket analyst. "
+                "Given the following batting statistics, write a sharp 3-4 sentence analysis. "
+                "Mention the momentum score, form trend, and one specific insight about format performance. "
+                "Be direct and analytical, like a TV expert — no fluff."
+            ),
+            user_prompt=stats_summary,
         )
-
-        llm_analysis = response["message"]["content"]
 
         # Return structured output combining numbers + narrative
         return f"""

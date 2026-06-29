@@ -10,9 +10,7 @@ LangGraph merges returned dicts back into the shared state automatically.
 """
 
 import asyncio
-import ollama
-
-from src.config import Config
+from src.llm.client import invoke_llm
 from src.graph.state import CricketIQState
 from src.tools.cricket_data import PLAYER_STATS, BOWLER_STATS, PITCH_CONDITIONS
 
@@ -36,45 +34,55 @@ _pitch_agent             = PitchAgent()
 _live_match_agent        = LiveMatchAgent()
 _matchup_predictor_agent = MatchupPredictorAgent()
 
-_config = Config()
 
 # ---------------------------------------------------------------------------
 # SUPERVISOR NODE
 # ---------------------------------------------------------------------------
 
 async def supervisor_node(state: CricketIQState) -> dict:
-    """
-    Rule-based supervisor.
-    Decides which specialist agents to run without using an LLM.
-    """
-
     query = state["query"].lower()
     planned = []
 
-    # Batter detection
-    if any(player.lower() in query for player in PLAYER_STATS):
-        planned.append("CricketAgent")
+    # Batter detection — check partial name match too
+    for player in PLAYER_STATS:
+        parts = player.split()
+        if player in query or any(p in query for p in parts if len(p) > 3):
+            planned.append("CricketAgent")
+            break
 
-    # Bowler detection
-    if any(bowler.lower() in query for bowler in BOWLER_STATS):
-        planned.append("BowlerAgent")
+    # Bowler detection — check partial name match too
+    for bowler in BOWLER_STATS:
+        parts = bowler.split()
+        if bowler in query or any(p in query for p in parts if len(p) > 3):
+            planned.append("BowlerAgent")
+            break
 
-    # Matchup analysis
+    # Matchup analysis — only if both batter and bowler found
     if "CricketAgent" in planned and "BowlerAgent" in planned:
         planned.append("MatchupAgent")
         planned.append("MatchupPredictorAgent")
 
     # Venue detection
-    if any(venue.lower() in query for venue in PITCH_CONDITIONS):
-        planned.append("WeatherAgent")
-        planned.append("PitchAgent")
+    for venue in PITCH_CONDITIONS:
+        if venue in query:
+            planned.append("WeatherAgent")
+            planned.append("PitchAgent")
+            break
 
-    # Live match detection
-    if any(word in query for word in ["live", "score", "schedule", "upcoming", "completed", "recent", "result", "results", "won", "finished", "yesterday"]):
+    # Historical query — do NOT route to LiveMatchAgent
+    historical_keywords = ["2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023", "scorecard", "semifinal", "final", "world cup"]
+    is_historical = any(word in query for word in historical_keywords)
+
+    # Live match detection — only if not historical
+    live_keywords = ["live", "score", "schedule", "upcoming", "completed", "recent", "result", "results", "won", "finished", "yesterday"]
+    if not is_historical and any(word in query for word in live_keywords):
+        planned.append("LiveMatchAgent")
+
+    # Fallback — if nothing matched, default to LiveMatchAgent
+    if not planned:
         planned.append("LiveMatchAgent")
 
     print(f"\n[Supervisor] Routing to: {planned}")
-
     return {"planned_agents": planned}
 
 # ---------------------------------------------------------------------------
@@ -184,29 +192,18 @@ async def aggregator_node(state: CricketIQState) -> dict:
 
     sections_text = "\n".join(sections)
 
-    response = await asyncio.to_thread(
-        ollama.chat,
-        model=_config.OLLAMA_MODEL,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are the final aggregator for CricketIQ. "
-                    "You receive outputs from specialist cricket analysis agents. "
-                    f"Write a clear, confident final report in 6-8 sentences covering:\n"
-                    f"{sections_text}\n"
-                    "Sound like a senior analyst presenting to a team selection committee. "
-                    "Be specific with numbers from the data."
-                ),
-            },
-            {
-                "role": "user",
-                "content": f"User question: {query}\n\nAgent outputs:\n{combined}",
-            },
-        ],
+    final = await asyncio.to_thread(
+        invoke_llm,
+        system_prompt=(
+            "You are the final aggregator for CricketIQ. "
+            "You receive outputs from specialist cricket analysis agents. "
+            f"Write a clear, confident final report in 6-8 sentences covering:\n"
+            f"{sections_text}\n"
+            "Sound like a senior analyst presenting to a team selection committee. "
+            "Be specific with numbers from the data."
+        ),
+        user_prompt=f"User question: {query}\n\nAgent outputs:\n{combined}",
     )
-
-    final = response["message"]["content"]
     print(f"[Aggregator] Report generated.")
 
     separator = "=" * 60

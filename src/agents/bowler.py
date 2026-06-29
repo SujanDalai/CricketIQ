@@ -1,7 +1,6 @@
-import ollama
 from src.agents.base import BaseAgent
-from src.tools.cricket_data import BOWLER_STATS, resolve_bowlers
-from src.config import Config
+from src.tools.cricket_data import BOWLER_STATS, PLAYER_STATS, resolve_bowlers
+from src.llm.client import invoke_llm
 
 
 class BowlerAgent(BaseAgent):
@@ -12,13 +11,8 @@ class BowlerAgent(BaseAgent):
 
     def __init__(self):
         super().__init__(name="BowlerAgent", role="Bowling Analysis and Matchup Intelligence")
-        self.config = Config()
 
     def _compute_bowling_rating(self, bowler_name: str) -> dict:
-        """
-        Compute a bowling threat rating based on recent wickets,
-        economy, and format consistency.
-        """
         data = BOWLER_STATS.get(bowler_name.lower())
         if not data:
             return {"error": f"No data found for {bowler_name}"}
@@ -31,18 +25,14 @@ class BowlerAgent(BaseAgent):
         economies = [m["economy"] for m in matches]
         n = len(wickets)
 
-        # Weighted recent form (most recent matters more)
         weights = [2 ** i for i in range(n)]
         weighted_wickets = sum(w * wt for w, wt in zip(wickets, weights)) / sum(weights)
         avg_economy = sum(economies) / n
 
-        # Threat rating out of 10
-        # Good bowler = high wickets, low economy
-        wicket_score = min((weighted_wickets / 3.0) * 5, 5)   # max 5 points for wickets
-        economy_score = max(5 - (avg_economy - 2.0), 0)        # max 5 points for economy
+        wicket_score = min((weighted_wickets / 3.0) * 5, 5)
+        economy_score = max(5 - (avg_economy - 2.0), 0)
         threat_rating = round(min(wicket_score + economy_score, 10), 1)
 
-        # Consistency
         mean_w = sum(wickets) / n
         variance = sum((w - mean_w) ** 2 for w in wickets) / n
         consistency = "consistent" if variance ** 0.5 < 1.0 else "variable"
@@ -65,9 +55,6 @@ class BowlerAgent(BaseAgent):
         }
 
     def get_matchup(self, bowler_name: str, batter_name: str) -> dict:
-        """
-        Return head-to-head stats between this bowler and a specific batter.
-        """
         data = BOWLER_STATS.get(bowler_name.lower(), {})
         h2h = data.get("head_to_head", {}).get(batter_name.lower())
         if not h2h:
@@ -88,16 +75,10 @@ class BowlerAgent(BaseAgent):
         }
 
     def _run_single(self, bowler_name: str, task_lower: str) -> str:
-        """
-        Run analysis for a single resolved bowler name.
-        Internal helper used by run() for both single and group queries.
-        """
         stats = self._compute_bowling_rating(bowler_name)
         if "error" in stats:
             return f"BowlerAgent Error: {stats['error']}"
 
-        # Find batter if mentioned (for H2H)
-        from src.tools.cricket_data import PLAYER_STATS
         h2h_section = ""
         for batter_name in PLAYER_STATS.keys():
             if batter_name in task_lower:
@@ -129,24 +110,16 @@ Weaknesses: {', '.join(stats['weaknesses'])}
 {h2h_section}
 """
 
-        response = ollama.chat(
-            model=self.config.OLLAMA_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a professional cricket bowling analyst. "
-                        "Given the bowling statistics, write a sharp 3-4 sentence analysis. "
-                        "Mention the threat rating, their key weapon, and how dangerous they are "
-                        "in specific conditions or formats. If H2H data is present, comment on "
-                        "who has the edge and why. Be direct — like a TV expert."
-                    ),
-                },
-                {"role": "user", "content": stats_summary},
-            ],
+        llm_analysis = invoke_llm(
+            system_prompt=(
+                "You are a professional cricket bowling analyst. "
+                "Given the bowling statistics, write a sharp 3-4 sentence analysis. "
+                "Mention the threat rating, their key weapon, and how dangerous they are "
+                "in specific conditions or formats. If H2H data is present, comment on "
+                "who has the edge and why. Be direct — like a TV expert."
+            ),
+            user_prompt=stats_summary,
         )
-
-        llm_analysis = response["message"]["content"]
 
         return f"""
 === BOWLING ANALYSIS: {stats['bowler']} ({stats['country']}) ===
@@ -163,16 +136,7 @@ ANALYST VERDICT:
 """
 
     def run(self, task: str) -> str:
-        """
-        Analyze a bowler's stats. Optionally include batter name for H2H.
-        Supports nationality groups: 'australian', 'english', 'australia', 'england'.
-        """
         task_lower = task.lower()
-
-        # Resolve bowler(s) — handles group keywords (e.g. "australian bowlers")
-        # as well as individual names. Returns at least one name.
         resolved = resolve_bowlers(task_lower)
-
-        # Run analysis for each resolved bowler and concatenate results
         outputs = [self._run_single(bowler_name, task_lower) for bowler_name in resolved]
         return "\n\n".join(outputs)
