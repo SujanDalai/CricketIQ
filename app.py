@@ -50,11 +50,11 @@ if os.path.exists(BACKGROUND_IMAGE_FILENAME):
     )
 
 # 3. App Title Heading Block
-st.markdown("<h1 style='text-align: center; color: white; margin-bottom: 5px;'>🏏 CricketIQ Multi-Agent Engine</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: #888A93; margin-bottom: 30px;'>Advanced analytical predictive intelligence for cricket matchups</p>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center; color: white; margin-bottom: 5px;'>🏏 CricketIQ : Multi-Agent Engine</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #888A93; margin-bottom: 30px;'>Analytical predictive intelligence for cricket matchups</p>", unsafe_allow_html=True)
 st.markdown("---")
 
-# 4. 🔍 User Query Input
+# 4.  User Query Input
 user_query = st.text_input(
     "Ask CricketIQ:", 
     value="", 
@@ -141,7 +141,7 @@ if user_query:
 
 # 📋 RENDER DISPLAY VIEW
 if st.session_state.current_report:
-        st.markdown("### 📋 CricketIQ Final Report")
+        st.markdown("###  CricketIQ Final Report")
         with st.container(border=True):
             
             # Render Probability Matrix Bars
