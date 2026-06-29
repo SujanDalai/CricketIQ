@@ -4,13 +4,56 @@ from src.tools.cricket_data import PITCH_CONDITIONS
 from src.config import Config
 
 VENUE_TO_CITY = {
-    "perth": "Perth,AU",
-    "mumbai": "Mumbai,IN",
+    # England
     "lord's": "London,GB",
+    "old trafford": "Manchester,GB",
     "edgbaston": "Birmingham,GB",
+    "the oval": "London,GB",
+    "trent bridge": "Nottingham,GB",
+    "headingley": "Leeds,GB",
+    "rose bowl": "Southampton,GB",
+    
+    # Australia
+    "mcg": "Melbourne,AU",
+    "scg": "Sydney,AU",
+    "perth stadium": "Perth,AU",
+    "adelaide oval": "Adelaide,AU",
+    "the gabba": "Brisbane,AU",
+    "waca": "Perth,AU",
+    
+    # India
+    "wankhede": "Mumbai,IN",
+    "arun jaitley stadium": "Delhi,IN",
+    "eden gardens": "Kolkata,IN",
+    "narendra modi stadium": "Ahmedabad,IN",
+    "m.a. chidambaram": "Chennai,IN",
+    "rajiv gandhi international": "Hyderabad,IN",
+    "delhi": "Delhi,IN",
+    "mumbai": "Mumbai,IN",
+    
+    # South Africa
+    "the wanderers": "Johannesburg,ZA",
+    "newlands": "Cape Town,ZA",
+    "kingsmead": "Durban,ZA",
+    
+    # West Indies
+    "sabina park": "Kingston,JM",
+    "queen's park oval": "Port of Spain,TT",
+    
+    # Pakistan
+    "gaddafi stadium": "Lahore,PK",
+    "national stadium": "Karachi,PK",
+    "rawalpindi stadium": "Rawalpindi,PK",
+    
+    # New Zealand
+    "basin reserve": "Wellington,NZ",
+    "eden park": "Auckland,NZ",
+    "whangarei": "Whangarei,NZ",
+    
+    # Generic fallbacks (for old data)
+    "perth": "Perth,AU",
     "sydney": "Sydney,AU",
     "melbourne": "Melbourne,AU",
-    "delhi": "Delhi,IN",
     "birmingham": "Birmingham,GB",
 }
 
