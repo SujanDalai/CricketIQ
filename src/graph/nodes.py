@@ -9,6 +9,7 @@ Each function represents a single node in the StateGraph. Every node:
 LangGraph merges returned dicts back into the shared state automatically.
 """
 
+import asyncio
 import json
 import ollama
 
@@ -42,7 +43,7 @@ _config = Config()
 # SUPERVISOR NODE
 # ---------------------------------------------------------------------------
 
-def supervisor_node(state: CricketIQState) -> dict:
+async def supervisor_node(state: CricketIQState) -> dict:
     """
     Analyses the user query and decides which specialist agents are needed.
     Writes the 'planned_agents' list to state.
@@ -53,7 +54,8 @@ def supervisor_node(state: CricketIQState) -> dict:
     known_bowlers = list(BOWLER_STATS.keys())
     known_venues  = list(PITCH_CONDITIONS.keys())
 
-    response = ollama.chat(
+    response = await asyncio.to_thread(
+        ollama.chat,
         model=_config.OLLAMA_MODEL,
         messages=[
             {
@@ -114,14 +116,14 @@ def supervisor_node(state: CricketIQState) -> dict:
 # SPECIALIST AGENT NODES
 # ---------------------------------------------------------------------------
 
-def cricket_node(state: CricketIQState) -> dict:
+async def cricket_node(state: CricketIQState) -> dict:
     """Batting statistics and form analysis."""
-    result = _cricket_agent.run(state["query"])
+    result = await asyncio.to_thread(_cricket_agent.run, state["query"])
     print(f"[CricketAgent] Done.")
     return {"agent_outputs": {"CricketAgent": result}}
 
 
-def bowler_node(state: CricketIQState) -> dict:
+async def bowler_node(state: CricketIQState) -> dict:
     """Bowling threat analysis — one call handles all bowlers in the query."""
     query = state["query"]
     query_lower = query.lower()
@@ -131,47 +133,48 @@ def bowler_node(state: CricketIQState) -> dict:
     if not mentioned_bowlers:
         mentioned_bowlers = list(BOWLER_STATS.keys())[:1]
 
-    outputs = []
-    for bowler in mentioned_bowlers:
-        task = f"bowling analysis for {bowler} vs batter in: {query}"
-        outputs.append(_bowler_agent.run(task))
+    tasks = [
+        asyncio.to_thread(_bowler_agent.run, f"bowling analysis for {bowler} vs batter in: {query}")
+        for bowler in mentioned_bowlers
+    ]
+    outputs = await asyncio.gather(*tasks)
 
     combined = "\n\n".join(outputs)
     print(f"[BowlerAgent] Done ({len(mentioned_bowlers)} bowler(s)).")
     return {"agent_outputs": {"BowlerAgent": combined}}
 
 
-def matchup_node(state: CricketIQState) -> dict:
+async def matchup_node(state: CricketIQState) -> dict:
     """Batter vs bowler(s) matchup and tactical analysis."""
-    result = _matchup_agent.run(state["query"])
+    result = await asyncio.to_thread(_matchup_agent.run, state["query"])
     print(f"[MatchupAgent] Done.")
     return {"agent_outputs": {"MatchupAgent": result}}
 
 
-def matchup_predictor_node(state: CricketIQState) -> dict:
+async def matchup_predictor_node(state: CricketIQState) -> dict:
     """Predict batsman success probabilities and metrics against bowler."""
-    result = _matchup_predictor_agent.run(state["query"])
+    result = await asyncio.to_thread(_matchup_predictor_agent.run, state["query"])
     print(f"[MatchupPredictorAgent] Done.")
     return {"agent_outputs": {"MatchupPredictorAgent": result}}
 
 
-def weather_node(state: CricketIQState) -> dict:
+async def weather_node(state: CricketIQState) -> dict:
     """Real-time weather conditions and impact analysis for the venue."""
-    result = _weather_agent.run(state["query"])
+    result = await asyncio.to_thread(_weather_agent.run, state["query"])
     print(f"[WeatherAgent] Done.")
     return {"agent_outputs": {"WeatherAgent": result}}
 
 
-def pitch_node(state: CricketIQState) -> dict:
+async def pitch_node(state: CricketIQState) -> dict:
     """Pitch conditions and tactical surface analysis."""
-    result = _pitch_agent.run(state["query"])
+    result = await asyncio.to_thread(_pitch_agent.run, state["query"])
     print(f"[PitchAgent] Done.")
     return {"agent_outputs": {"PitchAgent": result}}
 
 
-def live_match_node(state: CricketIQState) -> dict:
+async def live_match_node(state: CricketIQState) -> dict:
     """Live scores and upcoming match schedule."""
-    result = _live_match_agent.run(state["query"])
+    result = await asyncio.to_thread(_live_match_agent.run, state["query"])
     print(f"[LiveMatchAgent] Done.")
     return {"agent_outputs": {"LiveMatchAgent": result}}
 
@@ -180,7 +183,7 @@ def live_match_node(state: CricketIQState) -> dict:
 # AGGREGATOR NODE
 # ---------------------------------------------------------------------------
 
-def aggregator_node(state: CricketIQState) -> dict:
+async def aggregator_node(state: CricketIQState) -> dict:
     """
     Receives all agent outputs from state and generates the final
     CricketIQ report using an LLM synthesis call.
@@ -216,7 +219,8 @@ def aggregator_node(state: CricketIQState) -> dict:
 
     sections_text = "\n".join(sections)
 
-    response = ollama.chat(
+    response = await asyncio.to_thread(
+        ollama.chat,
         model=_config.OLLAMA_MODEL,
         messages=[
             {

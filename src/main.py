@@ -1,3 +1,4 @@
+import asyncio
 from src.config import Config
 from src.graph.workflow import cricketiq_graph
 from src.graph.state import CricketIQState
@@ -19,7 +20,7 @@ def main():
         "final_report": "",
     }
 
-    result = cricketiq_graph.invoke(initial_state)
+    result = asyncio.run(cricketiq_graph.ainvoke(initial_state))
     print(result["final_report"])
 
 

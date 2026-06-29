@@ -9,6 +9,7 @@ Covers:
 """
 
 # pyrefly: ignore [missing-import]
+import asyncio
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -71,7 +72,7 @@ class TestSupervisorNode:
             "message": {"content": '["CricketAgent", "BowlerAgent", "PitchAgent"]'}
         }
         state = make_state(query="Will Kohli score vs Starc at Perth?")
-        result = supervisor_node(state)
+        result = asyncio.run(supervisor_node(state))
 
         assert "planned_agents" in result
         assert "CricketAgent" in result["planned_agents"]
@@ -82,7 +83,7 @@ class TestSupervisorNode:
             "message": {"content": '["CricketAgent", "FakeAgent"]'}
         }
         state = make_state(query="test query")
-        result = supervisor_node(state)
+        result = asyncio.run(supervisor_node(state))
 
         assert "FakeAgent" not in result["planned_agents"]
         assert "CricketAgent" in result["planned_agents"]
@@ -93,7 +94,7 @@ class TestSupervisorNode:
             "message": {"content": "This is not JSON at all"}
         }
         state = make_state(query="test")
-        result = supervisor_node(state)
+        result = asyncio.run(supervisor_node(state))
 
         # Falls back to CricketAgent
         assert result["planned_agents"] == ["CricketAgent"]
@@ -108,7 +109,7 @@ class TestAgentNodes:
     def test_cricket_node_writes_agent_output(self, mock_agent):
         mock_agent.run.return_value = "=== BATTING ANALYSIS: Virat Kohli ==="
         state = make_state(query="Kohli batting form")
-        result = cricket_node(state)
+        result = asyncio.run(cricket_node(state))
 
         assert "agent_outputs" in result
         assert "CricketAgent" in result["agent_outputs"]
@@ -119,7 +120,7 @@ class TestAgentNodes:
     def test_pitch_node_writes_agent_output(self, mock_agent):
         mock_agent.run.return_value = "=== PITCH ANALYSIS: Perth ==="
         state = make_state(query="pitch at Perth")
-        result = pitch_node(state)
+        result = asyncio.run(pitch_node(state))
 
         assert "PitchAgent" in result["agent_outputs"]
 
@@ -141,14 +142,14 @@ class TestAggregatorNode:
                 "PitchAgent": "Pitch report here.",
             }
         )
-        result = aggregator_node(state)
+        result = asyncio.run(aggregator_node(state))
 
         assert "final_report" in result
         assert "CRICKETIQ FINAL REPORT" in result["final_report"]
 
     def test_aggregator_handles_empty_outputs(self):
         state = make_state(query="test", agent_outputs={})
-        result = aggregator_node(state)
+        result = asyncio.run(aggregator_node(state))
         assert "final_report" in result
         assert "No agent outputs" in result["final_report"]
 
@@ -175,12 +176,12 @@ class TestGraphEndToEnd:
         ]
 
         graph = build_graph()
-        result = graph.invoke({
+        result = asyncio.run(graph.ainvoke({
             "query": "Will virat kohli score today?",
             "planned_agents": [],
             "agent_outputs": {},
             "final_report": "",
-        })
+        }))
 
         assert "final_report" in result
         assert result["final_report"].strip() != ""
