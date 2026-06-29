@@ -8,7 +8,8 @@ def main():
     print("Welcome to CricketIQ - Multi-Agent System (powered by LangGraph)")
 
     config = Config()
-    print(f"Using model: {config.OLLAMA_MODEL}")
+    print(f"Provider: {config.LLM_PROVIDER}")
+    print(f"Model: {config.LLM_MODEL}")
 
     query = input("\nAsk CricketIQ: ")
 

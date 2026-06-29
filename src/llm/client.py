@@ -1,4 +1,5 @@
 import os
+from src.config import Config
 from functools import lru_cache
 from langchain_groq import ChatGroq
 
