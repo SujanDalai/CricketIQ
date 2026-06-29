@@ -10,7 +10,6 @@ LangGraph merges returned dicts back into the shared state automatically.
 """
 
 import asyncio
-import json
 import ollama
 
 from src.config import Config
@@ -45,72 +44,38 @@ _config = Config()
 
 async def supervisor_node(state: CricketIQState) -> dict:
     """
-    Analyses the user query and decides which specialist agents are needed.
-    Writes the 'planned_agents' list to state.
+    Rule-based supervisor.
+    Decides which specialist agents to run without using an LLM.
     """
-    query = state["query"]
 
-    known_batters = list(PLAYER_STATS.keys())
-    known_bowlers = list(BOWLER_STATS.keys())
-    known_venues  = list(PITCH_CONDITIONS.keys())
+    query = state["query"].lower()
+    planned = []
 
-    response = await asyncio.to_thread(
-        ollama.chat,
-        model=_config.OLLAMA_MODEL,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are the supervisor of CricketIQ, a cricket analytics system. "
-                    "Given a user query, output ONLY a JSON array of agent name strings. "
-                    "Choose from: CricketAgent, BowlerAgent, MatchupAgent, WeatherAgent, "
-                    "PitchAgent, LiveMatchAgent, MatchupPredictorAgent. "
-                    f"Known batters: {known_batters}. "
-                    f"Known bowlers: {known_bowlers}. "
-                    f"Known venues: {known_venues}. "
-                    "Rules:\n"
-                    "- If any batter is mentioned, include CricketAgent.\n"
-                    "- If any bowler is mentioned, include BowlerAgent.\n"
-                    "- If both batter and bowler(s) are mentioned, include MatchupAgent and MatchupPredictorAgent.\n"
-                    "- If a venue is mentioned, include WeatherAgent and PitchAgent.\n"
-                    "- If 'live', 'score', 'schedule', or 'upcoming' is in the query, "
-                    "  include LiveMatchAgent.\n"
-                    "Example for 'Will Kohli score vs Starc at Perth in Test?': "
-                    '["CricketAgent", "BowlerAgent", "MatchupAgent", "MatchupPredictorAgent", "WeatherAgent", "PitchAgent"]\n'
-                    "Output ONLY the JSON array. No explanation."
-                ),
-            },
-            {"role": "user", "content": query},
-        ],
-    )
+    # Batter detection
+    if any(player.lower() in query for player in PLAYER_STATS):
+        planned.append("CricketAgent")
 
-    raw = response["message"]["content"].strip()
+    # Bowler detection
+    if any(bowler.lower() in query for bowler in BOWLER_STATS):
+        planned.append("BowlerAgent")
 
-    # Strip markdown fences if present
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    raw = raw.strip()
+    # Matchup analysis
+    if "CricketAgent" in planned and "BowlerAgent" in planned:
+        planned.append("MatchupAgent")
+        planned.append("MatchupPredictorAgent")
 
-    try:
-        planned = json.loads(raw)
-        if isinstance(planned, list):
-            # Validate against known agent names
-            valid = {
-                "CricketAgent", "BowlerAgent", "MatchupAgent",
-                "WeatherAgent", "PitchAgent", "LiveMatchAgent",
-                "MatchupPredictorAgent",
-            }
-            planned = [a for a in planned if a in valid]
-        else:
-            planned = ["CricketAgent"]
-    except Exception:
-        planned = ["CricketAgent"]
+    # Venue detection
+    if any(venue.lower() in query for venue in PITCH_CONDITIONS):
+        planned.append("WeatherAgent")
+        planned.append("PitchAgent")
+
+    # Live match detection
+    if any(word in query for word in ["live", "score", "schedule", "upcoming"]):
+        planned.append("LiveMatchAgent")
 
     print(f"\n[Supervisor] Routing to: {planned}")
-    return {"planned_agents": planned}
 
+    return {"planned_agents": planned}
 
 # ---------------------------------------------------------------------------
 # SPECIALIST AGENT NODES
