@@ -51,10 +51,10 @@ class TestRouter:
         assert "cricket_node" in result
         assert len(result) == 1  # unknown filtered out
 
-    def test_empty_planned_agents_falls_back_to_cricket(self):
+    def test_empty_planned_agents_falls_back_to_live_match(self):
         state = make_state(planned_agents=[])
         result = route_to_agents(state)
-        assert result == ["cricket_node"]
+        assert result == ["live_match_node"]
 
     def test_all_agents_map_correctly(self):
         state = make_state(planned_agents=list(AGENT_TO_NODE.keys()))

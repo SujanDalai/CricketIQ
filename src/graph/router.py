@@ -37,6 +37,6 @@ def route_to_agents(state: CricketIQState) -> list[str]:
     ]
 
     if not nodes:
-        nodes = ["cricket_node"]
+        nodes = ["live_match_node"]
 
     return nodes

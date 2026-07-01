@@ -79,7 +79,7 @@ async def supervisor_node(state: CricketIQState) -> dict:
     live_keywords = [
         "live match", "live score", "schedule", "upcoming match",
         "completed match", "recent match", "latest result", "won by",
-        "finished yesterday"
+        "finished yesterday", "result of", "who won"
     ]
     if not is_historical and any(word in query for word in live_keywords):
         planned.append("LiveMatchAgent")
