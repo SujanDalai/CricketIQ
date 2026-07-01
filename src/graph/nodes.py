@@ -74,7 +74,7 @@ async def supervisor_node(state: CricketIQState) -> dict:
     is_historical = any(word in query for word in historical_keywords)
 
     # Live match detection — only if not historical
-    live_keywords = ["live", "score", "schedule", "upcoming", "completed", "recent", "result", "results", "won", "finished", "yesterday"]
+    live_keywords = ["live match", "live score", "schedule", "upcoming match", "completed match", "recent match", "latest result", "won by", "finished yesterday"]
     if not is_historical and any(word in query for word in live_keywords):
         planned.append("LiveMatchAgent")
 
@@ -146,11 +146,9 @@ async def pitch_node(state: CricketIQState) -> dict:
 
 
 async def live_match_node(state: CricketIQState) -> dict:
-    """Live scores and upcoming match schedule."""
     result = await asyncio.to_thread(_live_match_agent.run, state["query"])
     print(f"[LiveMatchAgent] Done.")
     return {"agent_outputs": {"LiveMatchAgent": result}}
-
 
 # ---------------------------------------------------------------------------
 # AGGREGATOR NODE
@@ -175,20 +173,22 @@ async def aggregator_node(state: CricketIQState) -> dict:
 
     # Dynamically build the system prompt based on which agents ran
     active_agents = list(agent_outputs.keys())
-    sections = ["1) Overall verdict on the batter's current form."]
+    sections = []
+
+    if "CricketAgent" in active_agents:
+        sections.append(f"{len(sections)+1}) Overall verdict on the batter's current form.")
     if "BowlerAgent" in active_agents:
-        sections.append("2) Which bowler poses the biggest threat and why.")
+        sections.append(f"{len(sections)+1}) Which bowler poses the biggest threat and why.")
     if "MatchupAgent" in active_agents:
-        sections.append("3) The key matchup to watch.")
+        sections.append(f"{len(sections)+1}) The key matchup to watch.")
     if "MatchupPredictorAgent" in active_agents:
-        sections.append(f"{len(sections) + 1}) The detailed match dominance and dismissal probabilities with tactical explanation.")
+        sections.append(f"{len(sections)+1}) Dismissal and batting dominance probabilities.")
     if "PitchAgent" in active_agents:
-        sections.append(f"{len(sections) + 1}) How the pitch surface affects the contest.")
+        sections.append(f"{len(sections)+1}) How the pitch surface affects the contest.")
     if "WeatherAgent" in active_agents:
-        sections.append(f"{len(sections) + 1}) How weather conditions affect the match.")
+        sections.append(f"{len(sections)+1}) How weather conditions affect the match.")
     if "LiveMatchAgent" in active_agents:
-        sections.append(f"{len(sections) + 1}) Current live match or schedule context.")
-    sections.append(f"{len(sections) + 1}) A final prediction — will the batter score well?")
+        sections.append(f"{len(sections)+1}) Current live match or schedule context.")
 
     sections_text = "\n".join(sections)
 
