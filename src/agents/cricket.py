@@ -95,7 +95,28 @@ class CricketAgent(BaseAgent):
                 break
 
         if not player_name:
-            player_name = "virat kohli"
+            # Try to search CricAPI directly with words from the query
+            skip_words = {
+                "stats", "average", "record", "career", "ipl", "t20", "odi", "test",
+                "how", "many", "runs", "what", "are", "is", "the", "in", "of",
+                "score", "batting", "give", "me", "tell", "about", "2025", "2026"
+            }
+            words = [w for w in task_lower.split() if w not in skip_words and len(w) > 3]
+            search_term = " ".join(words[:3])
+            if search_term:
+                real_stats = self._get_real_stats(search_term)
+                if real_stats:
+                    llm_analysis = invoke_llm(
+                        system_prompt=(
+                            "You are a professional cricket analyst. "
+                            "Given the following career batting statistics, write a sharp 3-4 sentence analysis. "
+                            "Note: IPL stats are not available, only international career stats. "
+                            "Be direct and specific with the numbers."
+                        ),
+                        user_prompt=str(real_stats),
+                    )
+                    return f"=== BATTING ANALYSIS: {real_stats['name']} ===\n{llm_analysis}"
+            return "CricketAgent: Could not find player data. Note: IPL-specific stats are not available on the free tier. "
 
         # Try real API stats first
         real_stats = self._get_real_stats(player_name)

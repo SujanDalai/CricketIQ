@@ -83,6 +83,11 @@ async def supervisor_node(state: CricketIQState) -> dict:
     ]
     if not is_historical and any(word in query for word in live_keywords):
         planned.append("LiveMatchAgent")
+    # Stats query — fire CricketAgent even for unknown players
+    stats_keywords = ["stats", "average", "record", "career", "centuries", "how many runs", "batting average", "ipl"]
+    if any(word in query for word in stats_keywords):
+        if "CricketAgent" not in planned:
+            planned.append("CricketAgent")
 
     # Fallback for general match questions
     if not planned:
