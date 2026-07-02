@@ -15,29 +15,49 @@ class ImpactAgent(BaseAgent):
         config = Config()
         self.cric_api = CricAPI(config.CRIC_API_KEY)
 
+    def _search_match(self, query: str) -> tuple[str | None, str | None]:
+        """Search for a match ID by team names. Returns (match_id, match_name)."""
+        result = self.cric_api._get("currentMatches", params={"offset": 0})
+        if "error" in result:
+            return None, None
+
+        matches = result.get("data", [])
+        query_lower = query.lower()
+        query_words = [w for w in query_lower.split() if len(w) > 2]
+
+        scored = []
+        for m in matches:
+            name = m.get("name", "").lower()
+            score = sum(1 for w in query_words if w in name)
+            if score == 0:
+                continue
+
+            # Penalize U19, Women, emerging unless query mentions them
+            if "u19" in name and "u19" not in query_lower:
+                score -= 2
+            if "women" in name and "women" not in query_lower:
+                score -= 2
+            if "emerging" in name and "emerging" not in query_lower:
+                score -= 1
+
+            # Bonus for completed matches (have scorecards)
+            if m.get("matchEnded"):
+                score += 1
+
+            scored.append((score, m))
+
+        if not scored:
+            return None, None
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        best = scored[0][1]
+        return best.get("id"), best.get("name")
+
     def _fetch_scorecard(self, match_id: str) -> dict | None:
         result = self.cric_api._get("match_scorecard", params={"id": match_id})
         if "error" in result:
             return None
         return result.get("data")
-
-    def _search_match(self, query: str) -> str | None:
-        """Search for a match ID by team names."""
-        result = self.cric_api._get("currentMatches", params={"offset": 0})
-        if "error" in result:
-            return None
-
-        matches = result.get("data", [])
-        query_lower = query.lower()
-
-        for m in matches:
-            name = m.get("name", "").lower()
-            teams = [t.lower() for t in m.get("teams", [])]
-            if any(word in name for word in query_lower.split() if len(word) > 2):
-                return m.get("id")
-            if all(any(t in query_lower for t in teams) for _ in [1]):
-                return m.get("id")
-        return None
 
     def _analyze_batting(self, batting: list) -> list:
         """
@@ -56,10 +76,9 @@ class ImpactAgent(BaseAgent):
             if dismissal == "not out" or balls == 0:
                 continue
 
-            # Impact score = runs contribution weighted by strike rate
             impact_score = (runs * sr) / 100
 
-            if impact_score > 10:  # only meaningful contributions
+            if impact_score > 10:
                 impacts.append({
                     "batsman": name,
                     "runs": runs,
@@ -70,9 +89,8 @@ class ImpactAgent(BaseAgent):
                     "impact_score": round(impact_score, 1),
                 })
 
-        # Sort by impact score descending
         impacts.sort(key=lambda x: x["impact_score"], reverse=True)
-        return impacts[:3]  # top 3 most impactful dismissals
+        return impacts[:3]
 
     def _analyze_bowling(self, bowling: list) -> list:
         """
@@ -89,7 +107,6 @@ class ImpactAgent(BaseAgent):
             if overs == 0:
                 continue
 
-            # Impact score: wickets matter more than economy
             impact_score = (wickets * 15) - (eco * 2)
 
             if wickets > 0:
@@ -109,26 +126,24 @@ class ImpactAgent(BaseAgent):
         """
         Estimate over-by-over cumulative runs from batting data.
         Since we don't have ball-by-ball data, we distribute runs
-        proportionally based on strike rates.
+        proportionally based on powerplay/middle/death over patterns.
         """
         total_overs_int = int(total_overs)
         if total_overs_int == 0:
             return []
 
-        # Calculate total runs and distribute across overs
         total_runs = sum(b.get("r", 0) for b in batting)
         worm = []
         cumulative = 0
 
         for over in range(1, total_overs_int + 1):
-            # Simple progressive distribution
-            # Early overs conservative, middle aggressive, death variable
             if over <= 6:
                 over_runs = total_runs * 0.28 / 6
             elif over <= 15:
                 over_runs = total_runs * 0.45 / 9
             else:
-                over_runs = total_runs * 0.27 / (total_overs_int - 15) if total_overs_int > 15 else 0
+                death_overs = max(total_overs_int - 15, 1)
+                over_runs = total_runs * 0.27 / death_overs
 
             cumulative += over_runs
             worm.append(round(cumulative))
@@ -141,10 +156,12 @@ class ImpactAgent(BaseAgent):
         return worm
 
     def run(self, task: str) -> str:
-        # Step 1: find match ID
-        match_id = self._search_match(task)
+        # Step 1: find match
+        match_id, match_found_name = self._search_match(task)
         if not match_id:
             return "ImpactAgent: Could not find a recent match matching your query."
+
+        print(f"[ImpactAgent] Analyzing: {match_found_name}")
 
         # Step 2: fetch scorecard
         scorecard_data = self._fetch_scorecard(match_id)
@@ -167,14 +184,12 @@ class ImpactAgent(BaseAgent):
             batting = inning.get("batting", [])
             bowling = inning.get("bowling", [])
 
-            # Get inning score info
             inning_score = score[i] if i < len(score) else {}
             total_runs = inning_score.get("r", 0)
             total_wickets = inning_score.get("w", 0)
             total_overs = inning_score.get("o", 20)
             inning_name = inning_score.get("inning", f"Inning {i+1}")
 
-            # Analyze
             batting_impacts = self._analyze_batting(batting)
             bowling_impacts = self._analyze_bowling(bowling)
             worm = self._estimate_worm_data(batting, total_overs)
@@ -207,21 +222,22 @@ class ImpactAgent(BaseAgent):
             system_prompt=(
                 "You are a cricket match analyst specializing in identifying turning points. "
                 "Given the match scorecard analysis, identify 2-3 specific turning points. "
-                "For each turning point state: which over (estimate), what happened, and how it shifted momentum. "
-                "Be specific with player names and numbers. Format each turning point on a new line starting with 'TURNING POINT:'. "
+                "For each turning point state: which over (estimate), what happened, "
+                "and how it shifted momentum. Be specific with player names and numbers. "
+                "Format each turning point on a new line starting with 'TURNING POINT:'. "
                 "End with one sentence on what ultimately decided the match."
             ),
             user_prompt=summary,
         )
 
-        # Step 6: format output
+        # Step 6: format output including worm data for Streamlit later
         output = f"""
 === IMPACT ANALYSIS: {match_name} ===
 Result: {status}
 
 {narrative}
 
-=== WORM GRAPH DATA ===
+=== WORM GRAPH DATA (for visualization) ===
 {worm_data}
 
 === TOP BATTING IMPACTS ==="""
