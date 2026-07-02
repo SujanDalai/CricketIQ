@@ -113,7 +113,7 @@ class CricketAgent(BaseAgent):
                 "score", "batting", "give", "me", "tell", "about", "2025", "2026",
                 "highest", "best", "form", "recent", "cricket"
             }
-            words = [w for w in task_lower.split() if w not in skip_words and len(w) > 3]
+            words = [w.strip("'s.,!?") for w in task_lower.split() if w.strip("'s.,!?") not in skip_words and len(w.strip("'s.,!?")) > 3]
             search_term = " ".join(words[:3])
             real_stats = self._get_real_stats(search_term) if search_term else None
 
