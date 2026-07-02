@@ -21,12 +21,13 @@ class CricketAgent(BaseAgent):
         result = self.cric_api.get_player_stats(player_name)
         if "error" in result:
             return None
+        if not result.get("batting_stats"):
+            return None
         return result
 
     def _compute_momentum_score(self, player_name: str) -> dict:
         """
         Compute a weighted momentum score from local recent innings data.
-        Used as supplementary context alongside real career stats.
         """
         data = PLAYER_STATS.get(player_name.lower())
         if not data:
@@ -83,10 +84,17 @@ class CricketAgent(BaseAgent):
             "worst": min(runs),
         }
 
+    def _clean_stats(self, batting_stats: dict) -> dict:
+        """Remove duplicate keys with spaces from CricAPI response."""
+        return {
+            fmt: {k: v for k, v in stats.items() if k.strip() == k}
+            for fmt, stats in batting_stats.items()
+        }
+
     def run(self, task: str) -> str:
         task_lower = task.lower()
 
-        # Detect player name
+        # Detect player name from local data keys
         player_name = None
         for name in PLAYER_STATS.keys():
             parts = name.split()
@@ -94,34 +102,54 @@ class CricketAgent(BaseAgent):
                 player_name = name
                 break
 
-        if not player_name:
-            # Try to search CricAPI directly with words from the query
+        # Try real API stats
+        if player_name:
+            real_stats = self._get_real_stats(player_name)
+        else:
+            # Unknown player — extract name from query and try CricAPI directly
             skip_words = {
                 "stats", "average", "record", "career", "ipl", "t20", "odi", "test",
                 "how", "many", "runs", "what", "are", "is", "the", "in", "of",
-                "score", "batting", "give", "me", "tell", "about", "2025", "2026"
+                "score", "batting", "give", "me", "tell", "about", "2025", "2026",
+                "highest", "best", "form", "recent", "cricket"
             }
             words = [w for w in task_lower.split() if w not in skip_words and len(w) > 3]
             search_term = " ".join(words[:3])
-            if search_term:
-                real_stats = self._get_real_stats(search_term)
-                if real_stats:
-                    llm_analysis = invoke_llm(
-                        system_prompt=(
-                            "You are a professional cricket analyst. "
-                            "Given the following career batting statistics, write a sharp 3-4 sentence analysis. "
-                            "Note: IPL stats are not available, only international career stats. "
-                            "Be direct and specific with the numbers."
-                        ),
-                        user_prompt=str(real_stats),
-                    )
-                    return f"=== BATTING ANALYSIS: {real_stats['name']} ===\n{llm_analysis}"
-            return "CricketAgent: Could not find player data. Note: IPL-specific stats are not available on the free tier. "
+            real_stats = self._get_real_stats(search_term) if search_term else None
 
-        # Try real API stats first
-        real_stats = self._get_real_stats(player_name)
+            if real_stats:
+                # Unknown player with real stats — quick analysis
+                bs = self._clean_stats(real_stats["batting_stats"])
+                stats_summary = f"""
+Player: {real_stats['name']} ({real_stats.get('country', 'N/A')})
+Role: {real_stats.get('role', 'N/A')}
 
-        # Also get momentum from local data
+CAREER BATTING STATS:
+  Test  — Matches: {bs.get('test', {}).get('m', 'N/A')}, Runs: {bs.get('test', {}).get('runs', 'N/A')}, HS: {bs.get('test', {}).get('hs', 'N/A')}, Avg: {bs.get('test', {}).get('avg', 'N/A')}, SR: {bs.get('test', {}).get('sr', 'N/A')}, 100s: {bs.get('test', {}).get('100s', 'N/A')}, 50s: {bs.get('test', {}).get('50s', 'N/A')}
+  ODI   — Matches: {bs.get('odi', {}).get('m', 'N/A')}, Runs: {bs.get('odi', {}).get('runs', 'N/A')}, HS: {bs.get('odi', {}).get('hs', 'N/A')}, Avg: {bs.get('odi', {}).get('avg', 'N/A')}, SR: {bs.get('odi', {}).get('sr', 'N/A')}, 100s: {bs.get('odi', {}).get('100s', 'N/A')}, 50s: {bs.get('odi', {}).get('50s', 'N/A')}
+  T20I  — Matches: {bs.get('t20i', {}).get('m', 'N/A')}, Runs: {bs.get('t20i', {}).get('runs', 'N/A')}, HS: {bs.get('t20i', {}).get('hs', 'N/A')}, Avg: {bs.get('t20i', {}).get('avg', 'N/A')}, SR: {bs.get('t20i', {}).get('sr', 'N/A')}, 100s: {bs.get('t20i', {}).get('100s', 'N/A')}, 50s: {bs.get('t20i', {}).get('50s', 'N/A')}
+"""
+                llm_analysis = invoke_llm(
+                    system_prompt=(
+                        "You are a professional cricket analyst. "
+                        "Given the following career batting statistics, write a sharp 3-4 sentence analysis. "
+                        "Note: IPL stats are not available, only international career stats. "
+                        "Be direct and specific with the numbers."
+                    ),
+                    user_prompt=stats_summary,
+                )
+                return f"""
+=== BATTING ANALYSIS: {real_stats['name']} ({real_stats.get('country', 'N/A')}) ===
+Test  — Runs: {bs.get('test', {}).get('runs', 'N/A')}, HS: {bs.get('test', {}).get('hs', 'N/A')}, Avg: {bs.get('test', {}).get('avg', 'N/A')}, 100s: {bs.get('test', {}).get('100s', 'N/A')}
+ODI   — Runs: {bs.get('odi', {}).get('runs', 'N/A')}, HS: {bs.get('odi', {}).get('hs', 'N/A')}, Avg: {bs.get('odi', {}).get('avg', 'N/A')}, 100s: {bs.get('odi', {}).get('100s', 'N/A')}
+T20I  — Runs: {bs.get('t20i', {}).get('runs', 'N/A')}, HS: {bs.get('t20i', {}).get('hs', 'N/A')}, Avg: {bs.get('t20i', {}).get('avg', 'N/A')}, 100s: {bs.get('t20i', {}).get('100s', 'N/A')}
+
+ANALYST VERDICT:
+{llm_analysis}
+"""
+            return "CricketAgent: Could not find player data. Note: IPL-specific stats are not available."
+
+        # Known player flow
         momentum = self._compute_momentum_score(player_name)
         momentum_section = ""
         if "error" not in momentum:
@@ -134,25 +162,19 @@ Recent innings (local data):
 """
 
         if real_stats:
-            bs = real_stats["batting_stats"]
-            # Clean stats — remove keys with spaces
-            cleaned = {}
-            for fmt, stats in bs.items():
-                cleaned[fmt] = {k: v for k, v in stats.items() if k.strip() == k}
-
+            bs = self._clean_stats(real_stats["batting_stats"])
             stats_summary = f"""
 Player: {real_stats['name']} ({real_stats['country']})
 Role: {real_stats['role']}
 
 CAREER BATTING STATS (real data from CricAPI):
-  Test  — Matches: {cleaned.get('test', {}).get('m', 'N/A')}, Runs: {cleaned.get('test', {}).get('runs', 'N/A')}, Avg: {cleaned.get('test', {}).get('avg', 'N/A')}, SR: {cleaned.get('test', {}).get('sr', 'N/A')}, 100s: {cleaned.get('test', {}).get('100s', 'N/A')}, 50s: {cleaned.get('test', {}).get('50s', 'N/A')}
-  ODI   — Matches: {cleaned.get('odi', {}).get('m', 'N/A')}, Runs: {cleaned.get('odi', {}).get('runs', 'N/A')}, Avg: {cleaned.get('odi', {}).get('avg', 'N/A')}, SR: {cleaned.get('odi', {}).get('sr', 'N/A')}, 100s: {cleaned.get('odi', {}).get('100s', 'N/A')}, 50s: {cleaned.get('odi', {}).get('50s', 'N/A')}
-  T20I  — Matches: {cleaned.get('t20i', {}).get('m', 'N/A')}, Runs: {cleaned.get('t20i', {}).get('runs', 'N/A')}, Avg: {cleaned.get('t20i', {}).get('avg', 'N/A')}, SR: {cleaned.get('t20i', {}).get('sr', 'N/A')}, 100s: {cleaned.get('t20i', {}).get('100s', 'N/A')}, 50s: {cleaned.get('t20i', {}).get('50s', 'N/A')}
+  Test  — Matches: {bs.get('test', {}).get('m', 'N/A')}, Runs: {bs.get('test', {}).get('runs', 'N/A')}, HS: {bs.get('test', {}).get('hs', 'N/A')}, Avg: {bs.get('test', {}).get('avg', 'N/A')}, SR: {bs.get('test', {}).get('sr', 'N/A')}, 100s: {bs.get('test', {}).get('100s', 'N/A')}, 50s: {bs.get('test', {}).get('50s', 'N/A')}
+  ODI   — Matches: {bs.get('odi', {}).get('m', 'N/A')}, Runs: {bs.get('odi', {}).get('runs', 'N/A')}, HS: {bs.get('odi', {}).get('hs', 'N/A')}, Avg: {bs.get('odi', {}).get('avg', 'N/A')}, SR: {bs.get('odi', {}).get('sr', 'N/A')}, 100s: {bs.get('odi', {}).get('100s', 'N/A')}, 50s: {bs.get('odi', {}).get('50s', 'N/A')}
+  T20I  — Matches: {bs.get('t20i', {}).get('m', 'N/A')}, Runs: {bs.get('t20i', {}).get('runs', 'N/A')}, HS: {bs.get('t20i', {}).get('hs', 'N/A')}, Avg: {bs.get('t20i', {}).get('avg', 'N/A')}, SR: {bs.get('t20i', {}).get('sr', 'N/A')}, 100s: {bs.get('t20i', {}).get('100s', 'N/A')}, 50s: {bs.get('t20i', {}).get('50s', 'N/A')}
 {momentum_section}
 """
             source = "CricAPI (real data)"
         else:
-            # Fallback to local data
             if "error" in momentum:
                 return f"CricketAgent Error: {momentum['error']}"
             stats_summary = f"""
@@ -171,29 +193,26 @@ Recent Scores   : {list(zip(momentum['recent_runs'], momentum['formats']))}
             system_prompt=(
                 "You are a professional cricket analyst. "
                 "Given the following batting statistics, write a sharp 3-4 sentence analysis. "
-                "Mention career averages across formats, current form trend, and one specific insight. "
+                "Mention career averages across formats, highest scores, current form trend, and one specific insight. "
                 "Be direct and analytical, like a TV expert — no fluff."
             ),
             user_prompt=stats_summary,
         )
 
-        header = f"=== BATTING ANALYSIS: {player_name.title()} (source: {source}) ==="
-
         if real_stats:
-            bs_clean = {fmt: {k: v for k, v in stats.items() if k.strip() == k}
-                       for fmt, stats in real_stats["batting_stats"].items()}
+            bs = self._clean_stats(real_stats["batting_stats"])
             return f"""
-{header}
-Test  — Runs: {bs_clean.get('test', {}).get('runs', 'N/A')}, Avg: {bs_clean.get('test', {}).get('avg', 'N/A')}, 100s: {bs_clean.get('test', {}).get('100s', 'N/A')}
-ODI   — Runs: {bs_clean.get('odi', {}).get('runs', 'N/A')}, Avg: {bs_clean.get('odi', {}).get('avg', 'N/A')}, 100s: {bs_clean.get('odi', {}).get('100s', 'N/A')}
-T20I  — Runs: {bs_clean.get('t20i', {}).get('runs', 'N/A')}, Avg: {bs_clean.get('t20i', {}).get('avg', 'N/A')}, 100s: {bs_clean.get('t20i', {}).get('100s', 'N/A')}
+=== BATTING ANALYSIS: {player_name.title()} (source: {source}) ===
+Test  — Runs: {bs.get('test', {}).get('runs', 'N/A')}, HS: {bs.get('test', {}).get('hs', 'N/A')}, Avg: {bs.get('test', {}).get('avg', 'N/A')}, 100s: {bs.get('test', {}).get('100s', 'N/A')}
+ODI   — Runs: {bs.get('odi', {}).get('runs', 'N/A')}, HS: {bs.get('odi', {}).get('hs', 'N/A')}, Avg: {bs.get('odi', {}).get('avg', 'N/A')}, 100s: {bs.get('odi', {}).get('100s', 'N/A')}
+T20I  — Runs: {bs.get('t20i', {}).get('runs', 'N/A')}, HS: {bs.get('t20i', {}).get('hs', 'N/A')}, Avg: {bs.get('t20i', {}).get('avg', 'N/A')}, 100s: {bs.get('t20i', {}).get('100s', 'N/A')}
 {momentum_section}
 ANALYST VERDICT:
 {llm_analysis}
 """
         else:
             return f"""
-{header}
+=== BATTING ANALYSIS: {player_name.title()} (source: {source}) ===
 Momentum Score : {momentum['momentum_score']}/10
 Form Trend     : {momentum['trend'].upper()}
 Consistency    : {momentum['consistency'].upper()}

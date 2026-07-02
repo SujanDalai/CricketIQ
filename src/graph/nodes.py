@@ -21,6 +21,7 @@ from src.agents.weather import WeatherAgent
 from src.agents.pitch import PitchAgent
 from src.agents.live_match import LiveMatchAgent
 from src.agents.matchup_predictor import MatchupPredictorAgent
+from src.agents.impact import ImpactAgent
 
 # ---------------------------------------------------------------------------
 # Agent singletons
@@ -32,6 +33,7 @@ _weather_agent           = WeatherAgent()
 _pitch_agent             = PitchAgent()
 _live_match_agent        = LiveMatchAgent()
 _matchup_predictor_agent = MatchupPredictorAgent()
+_impact_agent = ImpactAgent()
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +62,19 @@ async def supervisor_node(state: CricketIQState) -> dict:
     if "CricketAgent" in planned and "BowlerAgent" in planned:
         planned.append("MatchupAgent")
         planned.append("MatchupPredictorAgent")
+    
+    # Impact / Turning Point detection
+    impact_keywords = [
+        "turning point",
+        "impact over",
+        "when did",
+        "momentum",
+        "match change",
+        "scorecard"
+    ]
+
+    if any(keyword in query for keyword in impact_keywords):
+        planned.append("ImpactAgent")
 
     # Venue detection
     for venue in PITCH_CONDITIONS:
@@ -97,6 +112,7 @@ async def supervisor_node(state: CricketIQState) -> dict:
 
     print(f"\n[Supervisor] Routing to: {planned}")
     return {"planned_agents": planned}
+
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +173,12 @@ async def live_match_node(state: CricketIQState) -> dict:
     print(f"[LiveMatchAgent] Done.")
     return {"agent_outputs": {"LiveMatchAgent": result}}
 
+async def impact_node(state: CricketIQState) -> dict:
+    """Match turning point and impact over analysis."""
+    result = await asyncio.to_thread(_impact_agent.run, state["query"])
+    print(f"[ImpactAgent] Done.")
+    return {"agent_outputs": {"ImpactAgent": result}}
+
 
 # ---------------------------------------------------------------------------
 # AGGREGATOR NODE
@@ -191,7 +213,8 @@ async def aggregator_node(state: CricketIQState) -> dict:
         sections.append(f"{len(sections)+1}) How weather conditions affect the match.")
     if "LiveMatchAgent" in active_agents:
         sections.append(f"{len(sections)+1}) Current live match or schedule context.")
-
+    if "ImpactAgent" in active_agents:
+        sections.append(f"{len(sections)+1}) Match turning point and key momentum shifts.")
     sections_text = "\n".join(sections)
 
     final = await asyncio.to_thread(

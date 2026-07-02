@@ -100,8 +100,19 @@ class CricAPI:
         if not players:
             return {"error": f"No player found for '{player_name}'"}
 
-        player_id = players[0]["id"]
-        player_name_official = players[0]["name"]
+        # Pick the best match — prefer players from major cricket nations
+        major_nations = {"india", "australia", "england", "pakistan", "new zealand", 
+                         "south africa", "west indies", "sri lanka", "bangladesh", "zimbabwe"}
+
+        best = players[0]
+        for p in players:
+            country = p.get("country", "").lower()
+            if country in major_nations:
+                best = p
+                break
+
+        player_id = best["id"]
+        player_name_official = best["name"]
 
         # Step 2: fetch full player info
         info_result = self._get("players_info", params={"id": player_id})
