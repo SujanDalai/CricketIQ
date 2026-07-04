@@ -33,10 +33,6 @@ class CricAPI:
             return {"error": f"CricAPI request failed: {str(e)}"}
 
     def get_live_scores(self):
-        """
-        Fetch currently live cricket matches.
-        Returns a list of match summaries, or an error dict.
-        """
         result = self._get("currentMatches", params={"offset": 0})
         if "error" in result:
             return result
@@ -57,10 +53,6 @@ class CricAPI:
         ]
 
     def get_match_schedule(self):
-        """
-        Fetch upcoming match schedule.
-        Returns a list of upcoming matches, or an error dict.
-        """
         result = self._get("currentMatches", params={"offset": 0})
         if "error" in result:
             return result
@@ -79,19 +71,17 @@ class CricAPI:
         ]
 
     def search_player(self, player_name: str):
-        """
-        Search for a player by name. Returns matching player info.
-        """
         result = self._get("players", params={"offset": 0, "search": player_name})
         if "error" in result:
             return result
         return result.get("data", [])
+
     def get_player_stats(self, player_name: str) -> dict:
         """
-        Search for a player by name, fetch their full stats,
+        Search for a player by name, fetch their full stats (batting + bowling),
         and return a clean structured dict ready for the agents to use.
         """
-        # Step 1: search for player to get their ID
+        # Step 1: search for player
         search_result = self._get("players", params={"offset": 0, "search": player_name})
         if "error" in search_result:
             return {"error": search_result["error"]}
@@ -100,9 +90,12 @@ class CricAPI:
         if not players:
             return {"error": f"No player found for '{player_name}'"}
 
-        # Pick the best match — prefer players from major cricket nations
-        major_nations = {"india", "australia", "england", "pakistan", "new zealand", 
-                         "south africa", "west indies", "sri lanka", "bangladesh", "zimbabwe"}
+        # Prefer players from major cricket nations
+        major_nations = {
+            "india", "australia", "england", "pakistan", "new zealand",
+            "south africa", "west indies", "sri lanka", "bangladesh",
+            "zimbabwe", "afghanistan", "ireland"
+        }
 
         best = players[0]
         for p in players:
@@ -122,9 +115,8 @@ class CricAPI:
         data = info_result.get("data", {})
         stats = data.get("stats", [])
 
-        # Step 3: parse stats into a clean nested dict
-        # Structure: parsed[matchtype][stat] = value
-        parsed = {}
+        # Step 3: parse batting stats
+        batting_parsed = {}
         for s in stats:
             matchtype = s.get("matchtype")
             stat = s.get("stat")
@@ -135,15 +127,37 @@ class CricAPI:
                 continue
             if matchtype not in ("test", "odi", "t20i"):
                 continue
+            if stat and stat.strip() != stat:
+                continue  # skip keys with spaces
 
-            if matchtype not in parsed:
-                parsed[matchtype] = {}
-            parsed[matchtype][stat] = value
+            if matchtype not in batting_parsed:
+                batting_parsed[matchtype] = {}
+            batting_parsed[matchtype][stat] = value
+
+        # Step 4: parse bowling stats
+        bowling_parsed = {}
+        for s in stats:
+            matchtype = s.get("matchtype")
+            stat = s.get("stat")
+            value = s.get("value")
+            fn = s.get("fn")
+
+            if fn != "bowling":
+                continue
+            if matchtype not in ("test", "odi", "t20i"):
+                continue
+            if stat and stat.strip() != stat:
+                continue  # skip keys with spaces
+
+            if matchtype not in bowling_parsed:
+                bowling_parsed[matchtype] = {}
+            bowling_parsed[matchtype][stat] = value
 
         return {
             "name": player_name_official,
             "country": data.get("country"),
             "role": data.get("role"),
             "dob": data.get("dateOfBirth", "")[:10],
-            "batting_stats": parsed,
+            "batting_stats": batting_parsed,
+            "bowling_stats": bowling_parsed,
         }
