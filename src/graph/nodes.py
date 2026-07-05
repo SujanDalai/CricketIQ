@@ -22,6 +22,7 @@ from src.agents.pitch import PitchAgent
 from src.agents.live_match import LiveMatchAgent
 from src.agents.matchup_predictor import MatchupPredictorAgent
 from src.agents.impact import ImpactAgent
+from src.agents.historical_match import HistoricalMatchAgent
 
 # ---------------------------------------------------------------------------
 # Agent singletons
@@ -33,7 +34,8 @@ _weather_agent           = WeatherAgent()
 _pitch_agent             = PitchAgent()
 _live_match_agent        = LiveMatchAgent()
 _matchup_predictor_agent = MatchupPredictorAgent()
-_impact_agent = ImpactAgent()
+_impact_agent            = ImpactAgent()
+_historical_match_agent  = HistoricalMatchAgent()
 
 
 # ---------------------------------------------------------------------------
@@ -44,12 +46,33 @@ async def supervisor_node(state: CricketIQState) -> dict:
     query = state["query"].lower()
     planned = []
 
+    # Historical query check — do this FIRST
+    historical_keywords = [
+        "2003", "2007", "2008", "2009", "2010", "2011", "2012", "2013",
+        "2014", "2015", "2016", "2017", "2018", "2019", "2020", "2021",
+        "2022", "2023", "scorecard", "semifinal", "world cup"
+    ]
+    is_historical = any(word in query for word in historical_keywords)
+
     # Batter detection
+    # Batter detection — check local data first
+    batter_found = False
     for player in PLAYER_STATS:
         parts = player.split()
         if player in query or any(p in query for p in parts if len(p) > 3):
             planned.append("CricketAgent")
+            batter_found = True
             break
+
+    # Dynamic batter detection — if no local match, check if query implies a batter
+    if not batter_found:
+        batter_hint_keywords = [
+            "play against", "score against", "bat against", "face", 
+            "will he score", "will she score", "how will", "can he",
+            "batter", "batsman", "batsmen", "opener", "middle order"
+        ]
+        if any(keyword in query for keyword in batter_hint_keywords):
+            planned.append("CricketAgent")
 
     # Bowler detection
     for bowler in BOWLER_STATS:
@@ -62,18 +85,13 @@ async def supervisor_node(state: CricketIQState) -> dict:
     if "CricketAgent" in planned and "BowlerAgent" in planned:
         planned.append("MatchupAgent")
         planned.append("MatchupPredictorAgent")
-    
-    # Impact / Turning Point detection
-    impact_keywords = [
-        "turning point",
-        "impact over",
-        "when did",
-        "momentum",
-        "match change",
-        "scorecard"
-    ]
 
-    if any(keyword in query for keyword in impact_keywords):
+    # Impact detection — only for non-historical queries
+    impact_keywords = [
+        "turning point", "impact over", "impact overs",
+        "when did", "momentum shift", "match change",
+    ]
+    if not is_historical and any(keyword in query for keyword in impact_keywords):
         planned.append("ImpactAgent")
 
     # Venue detection
@@ -83,23 +101,20 @@ async def supervisor_node(state: CricketIQState) -> dict:
             planned.append("PitchAgent")
             break
 
-    # Historical query — do NOT route to LiveMatchAgent
-    historical_keywords = [
-        "2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023",
-        "scorecard", "semifinal", "final", "world cup"
-    ]
-    is_historical = any(word in query for word in historical_keywords)
-
     # Live match detection — only if not historical
     live_keywords = [
         "live match", "live score", "schedule", "upcoming match",
         "completed match", "recent match", "latest result", "won by",
-        "finished yesterday", "result of", "who won"
+        "finished yesterday", "result of", "who won", "score"
     ]
     if not is_historical and any(word in query for word in live_keywords):
         planned.append("LiveMatchAgent")
+
     # Stats query — fire CricketAgent even for unknown players
-    stats_keywords = ["stats", "average", "record", "career", "centuries", "how many runs", "batting average", "ipl"]
+    stats_keywords = [
+        "stats", "average", "record", "career", "centuries",
+        "how many runs", "batting average", "ipl", "highest score"
+    ]
     if any(word in query for word in stats_keywords):
         if "CricketAgent" not in planned:
             planned.append("CricketAgent")
@@ -112,7 +127,6 @@ async def supervisor_node(state: CricketIQState) -> dict:
 
     print(f"\n[Supervisor] Routing to: {planned}")
     return {"planned_agents": planned}
-
 
 
 # ---------------------------------------------------------------------------
@@ -173,11 +187,17 @@ async def live_match_node(state: CricketIQState) -> dict:
     print(f"[LiveMatchAgent] Done.")
     return {"agent_outputs": {"LiveMatchAgent": result}}
 
+
 async def impact_node(state: CricketIQState) -> dict:
-    """Match turning point and impact over analysis."""
     result = await asyncio.to_thread(_impact_agent.run, state["query"])
     print(f"[ImpactAgent] Done.")
     return {"agent_outputs": {"ImpactAgent": result}}
+
+
+async def historical_match_node(state: CricketIQState) -> dict:
+    result = await asyncio.to_thread(_historical_match_agent.run, state["query"])
+    print(f"[HistoricalMatchAgent] Done.")
+    return {"agent_outputs": {"HistoricalMatchAgent": result}}
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +235,9 @@ async def aggregator_node(state: CricketIQState) -> dict:
         sections.append(f"{len(sections)+1}) Current live match or schedule context.")
     if "ImpactAgent" in active_agents:
         sections.append(f"{len(sections)+1}) Match turning point and key momentum shifts.")
+    if "HistoricalMatchAgent" in active_agents:
+        sections.append(f"{len(sections)+1}) Historical cricket match details and query context.")
+
     sections_text = "\n".join(sections)
 
     final = await asyncio.to_thread(
@@ -224,7 +247,9 @@ async def aggregator_node(state: CricketIQState) -> dict:
             "You receive outputs from specialist cricket analysis agents. "
             "IMPORTANT: Only use data provided by the agents. Never invent statistics, "
             "scores, or predictions not present in the agent outputs. "
-            "If data is insufficient to answer the question, say so clearly. "
+            "If the agent data does not match the user's question (e.g. wrong match, wrong year), "
+            "explicitly say so and do NOT provide information from your own knowledge. "
+            "If data is insufficient, say so clearly and stop there. "
             f"Write a clear, confident final report in 6-8 sentences covering:\n"
             f"{sections_text}\n"
             "Sound like a senior analyst presenting to a team selection committee. "

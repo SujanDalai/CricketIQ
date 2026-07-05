@@ -13,6 +13,7 @@ AGENT_TO_NODE: dict[str, str] = {
     "LiveMatchAgent":        "live_match_node",
     "MatchupPredictorAgent": "matchup_predictor_node",
     "ImpactAgent":           "impact_node",
+    "HistoricalMatchAgent": "historical_match_node",
 }
 
 

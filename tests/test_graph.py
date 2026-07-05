@@ -133,11 +133,9 @@ class TestAgentNodes:
 # ---------------------------------------------------------------------------
 
 class TestAggregatorNode:
-    @patch("src.graph.nodes.ollama.chat")
-    def test_aggregator_generates_final_report(self, mock_chat):
-        mock_chat.return_value = {
-            "message": {"content": "Final analysis: Kohli is in great form."}
-        }
+    @patch("src.graph.nodes.invoke_llm")
+    def test_aggregator_generates_final_report(self, mock_invoke):
+        mock_invoke.return_value = "Final analysis: Kohli is in great form."
         state = make_state(
             query="Will Kohli score?",
             agent_outputs={
@@ -162,21 +160,15 @@ class TestAggregatorNode:
 # ---------------------------------------------------------------------------
 
 class TestGraphEndToEnd:
-    @patch("src.graph.nodes.ollama.chat")
-    def test_full_graph_invocation(self, mock_chat):
+    @patch("src.agents.cricket.invoke_llm")
+    @patch("src.graph.nodes.invoke_llm")
+    def test_full_graph_invocation(self, mock_nodes_invoke, mock_cricket_invoke):
         """
         Full graph smoke test: supervisor routes to cricket_node,
         which runs, then aggregator produces a final report.
         """
-        # Mock all ollama.chat calls in sequence
-        mock_chat.side_effect = [
-            # 1. Supervisor call → only CricketAgent
-            {"message": {"content": '["CricketAgent"]'}},
-            # 2. CricketAgent internal LLM call
-            {"message": {"content": "Kohli is in excellent form with momentum score 8.2/10."}},
-            # 3. Aggregator call
-            {"message": {"content": "Final report: Kohli will score big today."}},
-        ]
+        mock_cricket_invoke.return_value = "Kohli is in excellent form with momentum score 8.2/10."
+        mock_nodes_invoke.return_value = "Final report: Kohli will score big today."
 
         graph = build_graph()
         result = asyncio.run(graph.ainvoke({

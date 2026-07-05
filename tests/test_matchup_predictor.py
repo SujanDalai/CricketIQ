@@ -22,16 +22,9 @@ def agent():
 
 class TestMatchupPredictorAgent:
 
-    @patch("src.agents.matchup_predictor.ollama.chat")
-    def test_end_to_end_prediction_format(self, mock_chat, agent):
-        # Mock LLM verdict response
-        mock_response = MagicMock()
-        mock_response = {
-            "message": {
-                "content": "Starc has a clear edge early due to swing, but Kohli's recent ODI form suggests he will recover and score well in Mumbai."
-            }
-        }
-        mock_chat.return_value = mock_response
+    @patch("src.agents.matchup_predictor.invoke_llm")
+    def test_end_to_end_prediction_format(self, mock_invoke, agent):
+        mock_invoke.return_value = "Starc has a clear edge early due to swing, but Kohli's recent ODI form suggests he will recover and score well in Mumbai."
 
         # Execute prediction
         result_str = agent.run("Will Virat Kohli score runs against Mitchell Starc at Mumbai in ODI format?")
@@ -62,8 +55,8 @@ class TestMatchupPredictorAgent:
 
     def test_prediction_pipeline_determinism(self, agent):
         # Run prediction twice with same input; check that values are completely identical (no randomness)
-        with patch("src.agents.matchup_predictor.ollama.chat") as mock_chat:
-            mock_chat.return_value = {"message": {"content": "Mocked verdict"}}
+        with patch("src.agents.matchup_predictor.invoke_llm") as mock_invoke:
+            mock_invoke.return_value = "Mocked verdict"
             
             res1 = agent.run("Virat Kohli vs Mitchell Starc at Perth T20")
             res2 = agent.run("Virat Kohli vs Mitchell Starc at Perth T20")
@@ -85,8 +78,8 @@ class TestMatchupPredictorAgent:
             for k, (f, w) in original_pipeline.items():
                 agent.pipeline[k] = (f, w * 0.95)
                 
-            with patch("src.agents.matchup_predictor.ollama.chat") as mock_chat:
-                mock_chat.return_value = {"message": {"content": "Mocked verdict"}}
+            with patch("src.agents.matchup_predictor.invoke_llm") as mock_invoke:
+                mock_invoke.return_value = "Mocked verdict"
                 res = agent.run("Virat Kohli vs Mitchell Starc at Perth T20")
                 
                 # Check that custom factor description is present in key factors

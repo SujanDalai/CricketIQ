@@ -16,6 +16,7 @@ from src.graph.nodes import (
     live_match_node,
     matchup_predictor_node,
     impact_node,
+    historical_match_node,
     aggregator_node,
 )
 
@@ -28,6 +29,7 @@ _AGENT_NODES = [
     "live_match_node",
     "matchup_predictor_node",
     "impact_node",
+    "historical_match_node",
 ]
 
 
@@ -43,6 +45,7 @@ def build_graph():
     builder.add_node("live_match_node",        live_match_node)
     builder.add_node("matchup_predictor_node", matchup_predictor_node)
     builder.add_node("impact_node",            impact_node)
+    builder.add_node("historical_match_node",  historical_match_node)
     builder.add_node("aggregator_node",        aggregator_node)
 
     builder.set_entry_point("supervisor_node")

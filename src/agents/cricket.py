@@ -1,5 +1,5 @@
 from src.agents.base import BaseAgent
-from src.tools.cricket_data import PLAYER_STATS
+from src.tools.cricket_data import PLAYER_STATS, BOWLER_STATS
 from src.tools.cric_api import CricAPI
 from src.llm.client import invoke_llm
 from src.config import Config
@@ -18,6 +18,8 @@ class CricketAgent(BaseAgent):
 
     def _get_real_stats(self, player_name: str) -> dict | None:
         """Fetch real stats from CricAPI. Returns None on failure."""
+        if not player_name or len(player_name.strip()) < 4:
+            return None
         result = self.cric_api.get_player_stats(player_name)
         if "error" in result:
             return None
@@ -26,9 +28,6 @@ class CricketAgent(BaseAgent):
         return result
 
     def _compute_momentum_score(self, player_name: str) -> dict:
-        """
-        Compute a weighted momentum score from local recent innings data.
-        """
         data = PLAYER_STATS.get(player_name.lower())
         if not data:
             return {"error": f"No local data found for {player_name}"}
@@ -91,10 +90,45 @@ class CricketAgent(BaseAgent):
             for fmt, stats in batting_stats.items()
         }
 
+    def _extract_player_name(self, task_lower: str) -> str:
+        """
+        Extract a likely batter name from the query by removing
+        known non-player words and known bowler names.
+        """
+        # All known bowler name parts to exclude
+        bowler_words = set()
+        for bowler in BOWLER_STATS.keys():
+            for part in bowler.split():
+                bowler_words.add(part.lower())
+
+        # General skip words
+        skip_words = {
+            "stats", "average", "record", "career", "ipl", "t20", "odi", "test",
+            "how", "many", "runs", "what", "are", "is", "the", "in", "of", "at",
+            "score", "batting", "give", "me", "tell", "about", "2025", "2026",
+            "highest", "best", "form", "recent", "cricket", "will", "play",
+            "against", "face", "lords", "perth", "mumbai", "sydney", "match",
+            "can", "she", "her", "his", "him", "brisbane", "melbourne", "london",
+            "edgbaston", "oval", "wankhede", "eden", "gardens", "versus", "vs",
+            "today", "tomorrow", "series", "tour", "india", "australia", "england",
+            "pakistan", "africa", "zealand", "indies", "lanka", "bangladesh",
+        }
+
+        # Combine both sets
+        all_skip = skip_words | bowler_words
+
+        words = [
+            w.strip("'s.,!?") for w in task_lower.split()
+            if w.strip("'s.,!?") not in all_skip
+            and len(w.strip("'s.,!?")) > 3
+        ]
+
+        return " ".join(words[:2])  # first 2 meaningful words = likely player name
+
     def run(self, task: str) -> str:
         task_lower = task.lower()
 
-        # Detect player name from local data keys
+        # Detect player name from local data keys first
         player_name = None
         for name in PLAYER_STATS.keys():
             parts = name.split()
@@ -106,19 +140,12 @@ class CricketAgent(BaseAgent):
         if player_name:
             real_stats = self._get_real_stats(player_name)
         else:
-            # Unknown player — extract name from query and try CricAPI directly
-            skip_words = {
-                "stats", "average", "record", "career", "ipl", "t20", "odi", "test",
-                "how", "many", "runs", "what", "are", "is", "the", "in", "of",
-                "score", "batting", "give", "me", "tell", "about", "2025", "2026",
-                "highest", "best", "form", "recent", "cricket"
-            }
-            words = [w.strip("'s.,!?") for w in task_lower.split() if w.strip("'s.,!?") not in skip_words and len(w.strip("'s.,!?")) > 3]
-            search_term = " ".join(words[:3])
+            # Unknown player — extract name dynamically
+            search_term = self._extract_player_name(task_lower)
+            print(f"[CricketAgent] Searching CricAPI for: '{search_term}'")
             real_stats = self._get_real_stats(search_term) if search_term else None
 
             if real_stats:
-                # Unknown player with real stats — quick analysis
                 bs = self._clean_stats(real_stats["batting_stats"])
                 stats_summary = f"""
 Player: {real_stats['name']} ({real_stats.get('country', 'N/A')})
