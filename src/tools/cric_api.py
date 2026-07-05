@@ -81,28 +81,43 @@ class CricAPI:
         Search for a player by name, fetch their full stats (batting + bowling),
         and return a clean structured dict ready for the agents to use.
         """
-        # Step 1: search for player
-        search_result = self._get("players", params={"offset": 0, "search": player_name})
-        if "error" in search_result:
-            return {"error": search_result["error"]}
-
-        players = search_result.get("data", [])
-        if not players:
-            return {"error": f"No player found for '{player_name}'"}
-
-        # Prefer players from major cricket nations
         major_nations = {
             "india", "australia", "england", "pakistan", "new zealand",
             "south africa", "west indies", "sri lanka", "bangladesh",
             "zimbabwe", "afghanistan", "ireland"
         }
 
-        best = players[0]
-        for p in players:
-            country = p.get("country", "").lower()
-            if country in major_nations:
-                best = p
+        # Step 1: search with pagination across 3 pages
+        best = None
+        for offset in [0, 25, 50]:
+            search_result = self._get("players", params={"offset": offset, "search": player_name})
+            if "error" in search_result:
                 break
+
+            players = search_result.get("data", [])
+            for p in players:
+                name_match = player_name.lower() in p.get("name", "").lower()
+                country = p.get("country", "").lower()
+                if name_match and country in major_nations:
+                    best = p
+                    break
+
+            if best:
+                break
+
+        # Fallback — try last name only
+        if not best:
+            parts = player_name.strip().split()
+            if len(parts) > 1:
+                fallback = self._get("players", params={"offset": 0, "search": parts[-1]})
+                players = fallback.get("data", []) if "error" not in fallback else []
+                for p in players:
+                    if player_name.lower() in p.get("name", "").lower() and p.get("country", "").lower() in major_nations:
+                        best = p
+                        break
+
+        if not best:
+            return {"error": f"No player found for '{player_name}'"}
 
         player_id = best["id"]
         player_name_official = best["name"]
@@ -128,7 +143,7 @@ class CricAPI:
             if matchtype not in ("test", "odi", "t20i"):
                 continue
             if stat and stat.strip() != stat:
-                continue  # skip keys with spaces
+                continue
 
             if matchtype not in batting_parsed:
                 batting_parsed[matchtype] = {}
@@ -147,7 +162,7 @@ class CricAPI:
             if matchtype not in ("test", "odi", "t20i"):
                 continue
             if stat and stat.strip() != stat:
-                continue  # skip keys with spaces
+                continue
 
             if matchtype not in bowling_parsed:
                 bowling_parsed[matchtype] = {}

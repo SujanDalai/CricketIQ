@@ -117,13 +117,19 @@ class CricketAgent(BaseAgent):
         # Combine both sets
         all_skip = skip_words | bowler_words
 
-        words = [
-            w.strip("'s.,!?") for w in task_lower.split()
-            if w.strip("'s.,!?") not in all_skip
-            and len(w.strip("'s.,!?")) > 3
-        ]
+        words = []
+        for w in task_lower.split():
+            # Only strip possessive 's at the end, not the letter s
+            cleaned = w.rstrip(".,!?")
+            if cleaned.endswith("'s"):
+                cleaned = cleaned[:-2]
+            elif cleaned.endswith("s'"):
+                cleaned = cleaned[:-1]
+            if cleaned and cleaned not in all_skip and len(cleaned) > 3:
+                words.append(cleaned)
 
         return " ".join(words[:2])  # first 2 meaningful words = likely player name
+
 
     def run(self, task: str) -> str:
         task_lower = task.lower()

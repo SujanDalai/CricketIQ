@@ -112,9 +112,10 @@ async def supervisor_node(state: CricketIQState) -> dict:
 
     # Stats query — fire CricketAgent even for unknown players
     stats_keywords = [
-        "stats", "average", "record", "career", "centuries",
-        "how many runs", "batting average", "ipl", "highest score"
-    ]
+    "stats", "average", "avg", "record", "career", "centuries",
+    "how many runs", "batting average", "batting avg", "ipl",
+    "highest score", "highest", "wickets", "economy", "bowling avg"
+]
     if any(word in query for word in stats_keywords):
         if "CricketAgent" not in planned:
             planned.append("CricketAgent")
