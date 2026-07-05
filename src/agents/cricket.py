@@ -112,7 +112,9 @@ class CricketAgent(BaseAgent):
             "edgbaston", "oval", "wankhede", "eden", "gardens", "versus", "vs",
             "today", "tomorrow", "series", "tour", "india", "australia", "england",
             "pakistan", "africa", "zealand", "indies", "lanka", "bangladesh",
-        }
+        "should", "would", "could", "shall", "might", "must", "need",
+"want", "going", "trying", "looking", "planning", "thinking",
+"approach", "handle", "tackle", "deal", "bat", "bowl",}
 
         # Combine both sets
         all_skip = skip_words | bowler_words
