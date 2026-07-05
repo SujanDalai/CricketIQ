@@ -1,9 +1,7 @@
 import json
-from abc import ABC, abstractmethod
-from typing import Dict, Tuple
-
 from src.agents.base import BaseAgent
 from src.tools.cricket_data import PLAYER_STATS, BOWLER_STATS, PITCH_CONDITIONS
+from src.tools.cric_api import CricAPI
 from src.tools.weather_api import WeatherAPI
 from src.llm.client import invoke_llm
 from src.config import Config
@@ -13,297 +11,119 @@ VENUE_TO_CITY = {
     "perth": "Perth,AU",
     "mumbai": "Mumbai,IN",
     "lord's": "London,GB",
+    "lords": "London,GB",
     "edgbaston": "Birmingham,GB",
     "sydney": "Sydney,AU",
     "melbourne": "Melbourne,AU",
     "delhi": "Delhi,IN",
     "birmingham": "Birmingham,GB",
+    "chennai": "Chennai,IN",
+    "kolkata": "Kolkata,IN",
+    "bangalore": "Bangalore,IN",
+    "dubai": "Dubai,AE",
+    "auckland": "Auckland,NZ",
+    "johannesburg": "Johannesburg,ZA",
 }
-
-
-class MatchupFactor(ABC):
-    @abstractmethod
-    def calculate(self, context: dict) -> Tuple[float, float, str]:
-        pass
-
-
-class HeadToHeadFactor(MatchupFactor):
-    def calculate(self, context: dict) -> Tuple[float, float, str]:
-        batter = context["batsman"]
-        bowler = context["bowler"]
-
-        bowler_data = BOWLER_STATS.get(bowler, {})
-        h2h = bowler_data.get("head_to_head", {}).get(batter, {})
-
-        if not h2h or h2h.get("innings", 0) == 0:
-            return 0.5, 0.0, f"No historical head-to-head data available between {batter.title()} and {bowler.title()}."
-
-        innings = h2h.get("innings", 0)
-        dismissals = h2h.get("dismissals", 0)
-        avg = h2h.get("avg_conceded", 0)
-
-        avg_score = min(max((avg - 15) / 35.0, 0.0), 1.0)
-        dismissal_rate = dismissals / innings
-        dismissal_score = 1.0 - min(max((dismissal_rate - 0.1) / 0.4, 0.0), 1.0)
-        score = 0.5 * avg_score + 0.5 * dismissal_score
-        data_points = min(innings * 0.6, 3.0)
-
-        desc = (
-            f"Historical H2H: {batter.title()} averages {avg:.1f} against {bowler.title()} "
-            f"over {innings} innings with {dismissals} dismissals."
-        )
-        return score, data_points, desc
-
-
-class BatterRecentFormFactor(MatchupFactor):
-    def calculate(self, context: dict) -> Tuple[float, float, str]:
-        batter = context["batsman"]
-        fmt = context["format"]
-
-        batter_data = PLAYER_STATS.get(batter, {})
-        matches = batter_data.get("recent_matches", [])
-
-        if not matches:
-            return 0.5, 0.0, f"No recent match data available for {batter.title()}."
-
-        format_matches = [m for m in matches if m["format"] == fmt]
-        use_matches = format_matches if len(format_matches) >= 2 else matches
-
-        runs = [m["runs"] for m in use_matches]
-        n = len(runs)
-
-        weights = [1.5 ** i for i in range(n)]
-        weighted_runs = sum(r * w for r, w in zip(runs, weights))
-        total_weight = sum(weights)
-        weighted_avg = weighted_runs / total_weight
-
-        score = min(max((weighted_avg - 20) / 40.0, 0.0), 1.0)
-        data_points = min(n * 0.4, 2.0)
-
-        desc = (
-            f"Recent Form ({batter.title()}): Weighted average of {weighted_avg:.1f} "
-            f"across {n} recent {fmt if use_matches == format_matches else 'all-format'} matches."
-        )
-        return score, data_points, desc
-
-
-class BowlerRecentFormFactor(MatchupFactor):
-    def calculate(self, context: dict) -> Tuple[float, float, str]:
-        bowler = context["bowler"]
-        fmt = context["format"]
-
-        bowler_data = BOWLER_STATS.get(bowler, {})
-        spells = bowler_data.get("recent_wickets", [])
-
-        if not spells:
-            return 0.5, 0.0, f"No recent match data available for {bowler.title()}."
-
-        format_spells = [s for s in spells if s["format"] == fmt]
-        use_spells = format_spells if len(format_spells) >= 2 else spells
-
-        wickets = [s["wickets"] for s in use_spells]
-        economies = [s["economy"] for s in use_spells if s.get("economy") is not None]
-
-        avg_wickets = sum(wickets) / len(wickets)
-        avg_econ = sum(economies) / len(economies) if economies else (4.0 if fmt == "Test" else 6.0 if fmt == "ODI" else 8.0)
-
-        wickets_score = min(avg_wickets / 2.0, 1.0)
-
-        if fmt == "Test":
-            econ_score = 1.0 - min(max((avg_econ - 2.0) / 2.0, 0.0), 1.0)
-        elif fmt == "ODI":
-            econ_score = 1.0 - min(max((avg_econ - 4.0) / 2.5, 0.0), 1.0)
-        else:
-            econ_score = 1.0 - min(max((avg_econ - 6.5) / 3.0, 0.0), 1.0)
-
-        bowler_strength = 0.6 * wickets_score + 0.4 * econ_score
-        score = 1.0 - bowler_strength
-        data_points = min(len(use_spells) * 0.4, 2.0)
-
-        desc = (
-            f"Recent Form ({bowler.title()}): Averaging {avg_wickets:.1f} wickets and "
-            f"{avg_econ:.1f} economy in recent spells."
-        )
-        return score, data_points, desc
-
-
-class VenueConditionsFactor(MatchupFactor):
-    def calculate(self, context: dict) -> Tuple[float, float, str]:
-        venue = context["venue"]
-        bowler = context["bowler"]
-
-        pitch = PITCH_CONDITIONS.get(venue.lower())
-        if not pitch:
-            return 0.5, 0.0, f"No venue condition data available for {venue.title()}."
-
-        bowler_style = BOWLER_STATS.get(bowler, {}).get("bowling_style", "").lower()
-        favours = pitch.get("favours", "").lower()
-
-        score = 0.5
-
-        if "pace" in bowler_style or "fast" in bowler_style:
-            if pitch.get("pace") == "high" or pitch.get("bounce") == "high":
-                score -= 0.15
-            if pitch.get("swing") == "high":
-                score -= 0.1
-        elif "spin" in bowler_style:
-            if pitch.get("spin") == "high":
-                score -= 0.15
-
-        if "batter" in favours:
-            score += 0.15
-        elif "spinners" in favours and "spin" in bowler_style:
-            score -= 0.1
-        elif "pace" in favours and ("pace" in bowler_style or "fast" in bowler_style):
-            score -= 0.1
-
-        score = min(max(score, 0.0), 1.0)
-
-        desc = (
-            f"Venue ({venue.title()}): Pitch has {pitch.get('pace')} pace and {pitch.get('bounce')} bounce, "
-            f"favouring {pitch.get('favours')}."
-        )
-        return score, 1.5, desc
-
-
-class WeatherConditionsFactor(MatchupFactor):
-    def calculate(self, context: dict) -> Tuple[float, float, str]:
-        weather = context["weather"]
-        bowler = context["bowler"]
-
-        if "error" in weather or not weather:
-            return 0.5, 0.5, "Weather data unavailable; using neutral weather assumptions."
-
-        bowler_style = BOWLER_STATS.get(bowler, {}).get("bowling_style", "").lower()
-        humidity = weather.get("humidity_pct", 50)
-        wind = weather.get("wind_speed_mps", 0)
-        condition = weather.get("condition", "").lower()
-
-        score = 0.5
-
-        if "swing" in bowler_style or "fast" in bowler_style or "pace" in bowler_style:
-            if humidity > 70:
-                score -= 0.1
-            if wind > 5:
-                score -= 0.05
-            if any(c in condition for c in ["cloud", "overcast", "rain"]):
-                score -= 0.05
-
-        score = min(max(score, 0.0), 1.0)
-        data_points = 1.5 if "error" not in weather else 0.5
-
-        desc = (
-            f"Weather: {weather.get('temperature_c')}°C, Humidity {humidity}%, "
-            f"Wind {wind} m/s, Condition: {weather.get('condition')}."
-        )
-        return score, data_points, desc
-
-
-class StrengthWeaknessMatchupFactor(MatchupFactor):
-    def calculate(self, context: dict) -> Tuple[float, float, str]:
-        batter = context["batsman"]
-        bowler = context["bowler"]
-
-        batter_data = PLAYER_STATS.get(batter, {})
-        bowler_data = BOWLER_STATS.get(bowler, {})
-
-        b_weak = batter_data.get("weaknesses", [])
-        b_strong = batter_data.get("strengths", [])
-        bo_weak = bowler_data.get("weaknesses", [])
-        bo_strong = bowler_data.get("strengths", [])
-
-        score = 0.5
-        bw_matches = 0
-        bs_matches = 0
-
-        for w in b_weak:
-            for s in bo_strong:
-                s_words = [word.strip(",. ") for word in s.split() if len(word) > 2]
-                if any(word in w.lower() for word in s_words):
-                    score -= 0.15
-                    bw_matches += 1
-                    break
-
-        for s in b_strong:
-            for w in bo_weak:
-                w_words = [word.strip(",. ") for word in w.split() if len(word) > 2]
-                if any(word in s.lower() for word in w_words):
-                    score += 0.15
-                    bs_matches += 1
-                    break
-
-        score = min(max(score, 0.0), 1.0)
-
-        desc = (
-            f"Tactical Attributes: Found {bw_matches} bowler strength vs batter weakness overlap(s) "
-            f"and {bs_matches} batter strength vs bowler weakness overlap(s)."
-        )
-        return score, 1.5, desc
 
 
 class MatchupPredictorAgent(BaseAgent):
     """
-    Player Matchup Predictor predicts how likely a batsman is to succeed against
-    a specific bowler using a weighted multi-factor calculation.
+    Predicts batter vs bowler matchup outcome using real CricAPI stats
+    and LLM reasoning. Works for any player combination.
     """
-    def __init__(self):
-        super().__init__(name="MatchupPredictorAgent", role="Data-Driven Matchup Prediction and Analytics")
-        config = Config()
-        self.weather_api = WeatherAPI(config.WEATHER_API_KEY, config.WEATHER_API_URL)
 
-        self.pipeline: Dict[str, Tuple[MatchupFactor, float]] = {
-            "head_to_head":         (HeadToHeadFactor(),            0.30),
-            "batter_form":          (BatterRecentFormFactor(),       0.20),
-            "bowler_form":          (BowlerRecentFormFactor(),       0.20),
-            "venue":                (VenueConditionsFactor(),        0.10),
-            "weather":              (WeatherConditionsFactor(),      0.10),
-            "strengths_weaknesses": (StrengthWeaknessMatchupFactor(), 0.10),
-        }
+    def __init__(self):
+        super().__init__(name="MatchupPredictorAgent", role="Data-Driven Matchup Prediction")
+        config = Config()
+        self.cric_api = CricAPI(config.CRIC_API_KEY)
+        self.weather_api = WeatherAPI(config.WEATHER_API_KEY, config.WEATHER_API_URL)
 
     def _get_weather_fallback(self, venue: str) -> dict:
         v = venue.lower()
         if "perth" in v:
-            return {"temperature_c": 22.0, "feels_like_c": 21.0, "humidity_pct": 45, "wind_speed_mps": 4.5, "condition": "Clear", "description": "sunny"}
-        elif any(name in v for name in ["london", "lord's", "edgbaston", "birmingham"]):
-            return {"temperature_c": 16.0, "feels_like_c": 15.0, "humidity_pct": 72, "wind_speed_mps": 5.8, "condition": "Clouds", "description": "overcast"}
-        elif any(name in v for name in ["mumbai", "delhi"]):
-            return {"temperature_c": 31.0, "feels_like_c": 36.0, "humidity_pct": 82, "wind_speed_mps": 2.5, "condition": "Haze", "description": "humid and hazy"}
+            return {"temperature_c": 22.0, "humidity_pct": 45, "wind_speed_mps": 4.5, "condition": "Clear"}
+        elif any(n in v for n in ["london", "lords", "edgbaston", "birmingham"]):
+            return {"temperature_c": 16.0, "humidity_pct": 72, "wind_speed_mps": 5.8, "condition": "Clouds"}
+        elif any(n in v for n in ["mumbai", "delhi", "chennai", "kolkata", "bangalore"]):
+            return {"temperature_c": 31.0, "humidity_pct": 82, "wind_speed_mps": 2.5, "condition": "Haze"}
         else:
-            return {"temperature_c": 19.0, "feels_like_c": 18.5, "humidity_pct": 58, "wind_speed_mps": 3.8, "condition": "Clear", "description": "partly cloudy"}
+            return {"temperature_c": 24.0, "humidity_pct": 60, "wind_speed_mps": 3.5, "condition": "Clear"}
+
+    def _clean_stats(self, stats: dict) -> dict:
+        return {
+            fmt: {k: v for k, v in s.items() if k.strip() == k}
+            for fmt, s in stats.items()
+        }
+
+    def _extract_names(self, task_lower: str) -> tuple[str, str]:
+        """Extract batter and bowler names from query."""
+        batter = None
+        bowler = None
+
+        # Check local data first
+        for name in PLAYER_STATS.keys():
+            parts = name.split()
+            if name in task_lower or any(p in task_lower for p in parts if len(p) > 3):
+                batter = name
+                break
+
+        for name in BOWLER_STATS.keys():
+            parts = name.split()
+            if name in task_lower or any(p in task_lower for p in parts if len(p) > 3):
+                bowler = name
+                break
+
+        # Dynamic extraction if not found locally
+        if not batter and "against" in task_lower:
+            before = task_lower.split("against")[0]
+            skip = {"how", "will", "should", "would", "play", "score",
+                    "bat", "face", "can", "the", "a", "an", "in", "at"}
+            words = [w.strip(".,!?") for w in before.split()
+                     if w.strip(".,!?") not in skip and len(w.strip(".,!?")) > 2]
+            batter = " ".join(words[-2:]) if words else None
+
+        if not bowler and "against" in task_lower:
+            after = task_lower.split("against")[-1]
+            skip = {"how", "will", "should", "would", "play", "score",
+                    "bowl", "the", "a", "an", "in", "at", "lords",
+                    "perth", "mumbai", "test", "odi", "t20", "brisbane"}
+            words = [w.strip(".,!?") for w in after.split()
+                     if w.strip(".,!?") not in skip and len(w.strip(".,!?")) > 2]
+            bowler = " ".join(words[:2]) if words else None
+
+        return batter or "", bowler or ""
+
+    def _estimate_probabilities(self, bowler_stats: dict | None, fmt_key: str) -> tuple[int, int]:
+        """Estimate dismissal/batting probabilities from bowler stats."""
+        dismissal_prob = 50
+        if bowler_stats:
+            bws = self._clean_stats(bowler_stats.get("bowling_stats", {}))
+            bwd = bws.get(fmt_key, {})
+            avg = bwd.get("avg", "30")
+            try:
+                avg_float = float(avg)
+                if avg_float < 20:
+                    dismissal_prob = 65
+                elif avg_float < 28:
+                    dismissal_prob = 57
+                elif avg_float < 35:
+                    dismissal_prob = 50
+                else:
+                    dismissal_prob = 43
+            except (ValueError, TypeError):
+                pass
+        return dismissal_prob, 100 - dismissal_prob
 
     def run(self, task: str) -> str:
         task_lower = task.lower()
 
-        batsman = None
-        for name in PLAYER_STATS.keys():
-            if name in task_lower:
-                batsman = name
-                break
-        if not batsman:
-            for name in PLAYER_STATS.keys():
-                parts = name.split()
-                if any(p in task_lower for p in parts if len(p) > 2):
-                    batsman = name
-                    break
+        # Extract player names
+        batter_name, bowler_name = self._extract_names(task_lower)
 
-        bowler = None
-        for name in BOWLER_STATS.keys():
-            if name in task_lower:
-                bowler = name
-                break
-        if not bowler:
-            for name in BOWLER_STATS.keys():
-                parts = name.split()
-                if any(p in task_lower for p in parts if len(p) > 2):
-                    bowler = name
-                    break
+        if not batter_name or not bowler_name:
+            return "MatchupPredictorAgent: Could not identify both batter and bowler in query."
 
-        if not batsman or not bowler:
-            return (
-                "MatchupPredictorAgent Error: Could not resolve batsman and bowler from the task. "
-                "Make sure both names are provided."
-            )
-
+        # Find venue and format
         venue = "mumbai"
         for v in PITCH_CONDITIONS.keys():
             if v in task_lower:
@@ -314,104 +134,108 @@ class MatchupPredictorAgent(BaseAgent):
         if "test" in task_lower:
             fmt = "Test"
         elif "t20" in task_lower:
-            fmt = "T20"
-        elif "odi" in task_lower:
-            fmt = "ODI"
+            fmt = "T20I"
 
+        fmt_map = {"test": "test", "odi": "odi", "t20i": "t20i"}
+        fmt_key = fmt_map.get(fmt.lower(), "odi")
+
+        # Get weather
         city = VENUE_TO_CITY.get(venue, venue)
         weather = self.weather_api.get_weather(city)
         if "error" in weather or not weather:
             weather = self._get_weather_fallback(venue)
 
-        context = {
-            "batsman": batsman,
-            "bowler": bowler,
-            "venue": venue,
-            "format": fmt,
-            "weather": weather,
-        }
+        # Fetch real stats from CricAPI
+        batter_stats = None
+        bowler_stats = None
 
-        total_score = 0.0
-        total_weight = 0.0
-        data_points_sum = 0.0
-        key_factors = []
+        batter_result = self.cric_api.get_player_stats(batter_name)
+        if "error" not in batter_result:
+            batter_stats = batter_result
 
-        for factor_name, (factor, weight) in self.pipeline.items():
-            score, data_points, desc = factor.calculate(context)
-            total_score += score * weight
-            total_weight += weight
-            data_points_sum += data_points
-            key_factors.append(desc)
+        bowler_result = self.cric_api.get_player_stats(bowler_name)
+        if "error" not in bowler_result:
+            bowler_stats = bowler_result
 
-        final_score = total_score / total_weight if total_weight > 0 else 0.5
+        # Build context for LLM
+        pitch = PITCH_CONDITIONS.get(venue.lower(), {
+            "pace": "medium", "bounce": "medium",
+            "spin": "medium", "swing": "medium",
+            "favours": "balanced"
+        })
 
-        batting_dominance_probability = int(round(final_score * 100))
-        dismissal_probability = 100 - batting_dominance_probability
+        batter_info = "Stats not available"
+        if batter_stats:
+            bs = self._clean_stats(batter_stats.get("batting_stats", {}))
+            bd = bs.get(fmt_key, {})
+            batter_info = (
+                f"{batter_stats.get('name')} ({batter_stats.get('country')}) — {batter_stats.get('role')}\n"
+                f"{fmt}: Avg={bd.get('avg','N/A')}, SR={bd.get('sr','N/A')}, "
+                f"Runs={bd.get('runs','N/A')}, HS={bd.get('hs','N/A')}, "
+                f"100s={bd.get('100s','N/A')}, 50s={bd.get('50s','N/A')}"
+            )
 
-        batter_data = PLAYER_STATS.get(batsman, {})
-        runs_list = [m["runs"] for m in batter_data.get("recent_matches", [])]
-        avg_runs = sum(runs_list) / len(runs_list) if runs_list else 45.0
-        expected_runs = int(round(avg_runs * (1.0 + (final_score - 0.5) * 0.8)))
-        expected_runs = max(expected_runs, 1)
+        bowler_info = "Stats not available"
+        if bowler_stats:
+            bws = self._clean_stats(bowler_stats.get("bowling_stats", {}))
+            bwd = bws.get(fmt_key, {})
+            bowler_info = (
+                f"{bowler_stats.get('name')} ({bowler_stats.get('country')}) — {bowler_stats.get('role')}\n"
+                f"{fmt}: Wkts={bwd.get('wkts','N/A')}, Avg={bwd.get('avg','N/A')}, "
+                f"Econ={bwd.get('econ','N/A')}, SR={bwd.get('sr','N/A')}, "
+                f"BBI={bwd.get('bbi','N/A')}"
+            )
 
-        base_sr = 130.0 if fmt == "T20" else 85.0 if fmt == "ODI" else 50.0
-        expected_strike_rate = int(round(base_sr * (1.0 + (final_score - 0.5) * 0.4)))
-
-        if data_points_sum >= 8.0:
-            confidence = "High"
-        elif data_points_sum >= 4.5:
-            confidence = "Medium"
-        else:
-            confidence = "Low"
+        dismissal_prob, batting_prob = self._estimate_probabilities(bowler_stats, fmt_key)
 
         prompt = f"""
-You are a senior cricket analyst.
-Given the calculated matchup prediction metrics below, write a sharp 2-3 sentence explanation (verdict) of this matchup.
-Do not use bullet points or any other formatting. Output ONLY the verdict sentences.
+BATTER: {batter_info}
 
-Matchup Context:
-- Batsman: {batsman.title()}
-- Bowler: {bowler.title()}
-- Venue: {venue.title()}
-- Format: {fmt}
-- Dismissal Probability: {dismissal_probability}%
-- Batting Dominance Probability: {batting_dominance_probability}%
-- Expected Runs: {expected_runs}
-- Expected Strike Rate: {expected_strike_rate}
-- Confidence: {confidence}
-- Key Factors:
-  {chr(10).join('- ' + f for f in key_factors)}
+BOWLER: {bowler_info}
+
+VENUE: {venue.title()}
+PITCH: pace={pitch.get('pace')}, bounce={pitch.get('bounce')}, swing={pitch.get('swing')}, spin={pitch.get('spin')}, favours={pitch.get('favours')}
+FORMAT: {fmt}
+WEATHER: {weather.get('temperature_c')}°C, Humidity={weather.get('humidity_pct')}%, Condition={weather.get('condition')}
+
+Estimated dismissal probability: {dismissal_prob}%
+Estimated batting dominance: {batting_prob}%
 """
 
         verdict = invoke_llm(
-            system_prompt="You are a direct, professional cricket analytics expert.",
+            system_prompt=(
+                "You are a senior cricket analytics expert. "
+                "Given the batter and bowler stats, provide a sharp matchup prediction in 3-4 sentences. "
+                "Cover: who has the edge, why, key pitch/weather factors, and a final prediction. "
+                "Be specific with the numbers provided. No bullet points."
+            ),
             user_prompt=prompt,
         )
 
+        def make_bar(pct: int, length: int = 20) -> str:
+            filled = int(round(length * pct / 100))
+            return f"[{'█' * filled}{'░' * (length - filled)}] {pct}%"
+
         output_dict = {
-            "batsman": batsman.title(),
-            "bowler": bowler.title(),
-            "dismissal_probability": dismissal_probability,
-            "batting_dominance_probability": batting_dominance_probability,
-            "expected_runs": expected_runs,
-            "expected_strike_rate": expected_strike_rate,
-            "confidence": confidence,
-            "key_factors": key_factors,
+            "batsman": batter_stats.get("name", batter_name.title()) if batter_stats else batter_name.title(),
+            "bowler": bowler_stats.get("name", bowler_name.title()) if bowler_stats else bowler_name.title(),
+            "format": fmt,
+            "venue": venue.title(),
+            "dismissal_probability": dismissal_prob,
+            "batting_dominance_probability": batting_prob,
+            "confidence": "Medium" if (batter_stats and bowler_stats) else "Low",
+            "data_source": "CricAPI real stats + LLM reasoning",
             "verdict": verdict,
         }
 
-        def make_bar(pct: int, length: int = 20) -> str:
-            filled_len = int(round(length * pct / 100))
-            bar = "█" * filled_len + "░" * (length - filled_len)
-            return f"[{bar}] {pct}%"
-
-        dom_bar = make_bar(batting_dominance_probability)
-        dism_bar = make_bar(dismissal_probability)
-
         return f"""=== PLAYER MATCHUP PREDICTOR ===
-Batting Dominance Probability : {dom_bar}
-Dismissal Probability         : {dism_bar}
+Batting Dominance : {make_bar(batting_prob)}
+Dismissal Prob    : {make_bar(dismissal_prob)}
 
-````json
+```json
 {json.dumps(output_dict, indent=2)}
-```"""
+```
+
+FULL ANALYSIS:
+{verdict}
+"""

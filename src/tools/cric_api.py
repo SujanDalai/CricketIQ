@@ -1,5 +1,7 @@
 import requests
 
+# Module-level cache — persists for the lifetime of the process
+_PLAYER_CACHE: dict = {}
 
 class CricAPI:
     """
@@ -81,6 +83,10 @@ class CricAPI:
         Search for a player by name, fetch their full stats (batting + bowling),
         and return a clean structured dict ready for the agents to use.
         """
+        # Check cache first
+        cache_key = player_name.lower().strip()
+        if cache_key in _PLAYER_CACHE:
+            return _PLAYER_CACHE[cache_key]
         major_nations = {
             "india", "australia", "england", "pakistan", "new zealand",
             "south africa", "west indies", "sri lanka", "bangladesh",
@@ -168,7 +174,7 @@ class CricAPI:
                 bowling_parsed[matchtype] = {}
             bowling_parsed[matchtype][stat] = value
 
-        return {
+        res = {
             "name": player_name_official,
             "country": data.get("country"),
             "role": data.get("role"),
@@ -176,3 +182,5 @@ class CricAPI:
             "batting_stats": batting_parsed,
             "bowling_stats": bowling_parsed,
         }
+        _PLAYER_CACHE[cache_key] = res
+        return res
