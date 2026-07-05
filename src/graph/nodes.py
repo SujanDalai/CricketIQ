@@ -22,7 +22,6 @@ from src.agents.pitch import PitchAgent
 from src.agents.live_match import LiveMatchAgent
 from src.agents.matchup_predictor import MatchupPredictorAgent
 from src.agents.impact import ImpactAgent
-from src.agents.historical_match import HistoricalMatchAgent
 
 # ---------------------------------------------------------------------------
 # Agent singletons
@@ -35,7 +34,6 @@ _pitch_agent             = PitchAgent()
 _live_match_agent        = LiveMatchAgent()
 _matchup_predictor_agent = MatchupPredictorAgent()
 _impact_agent            = ImpactAgent()
-_historical_match_agent  = HistoricalMatchAgent()
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +52,6 @@ async def supervisor_node(state: CricketIQState) -> dict:
     ]
     is_historical = any(word in query for word in historical_keywords)
 
-    # Batter detection
     # Batter detection — check local data first
     batter_found = False
     for player in PLAYER_STATS:
@@ -64,22 +61,33 @@ async def supervisor_node(state: CricketIQState) -> dict:
             batter_found = True
             break
 
-    # Dynamic batter detection — if no local match, check if query implies a batter
+    # Dynamic batter detection
     if not batter_found:
         batter_hint_keywords = [
-            "play against", "score against", "bat against", "face", 
+            "play against", "score against", "bat against", "face",
             "will he score", "will she score", "how will", "can he",
             "batter", "batsman", "batsmen", "opener", "middle order"
         ]
         if any(keyword in query for keyword in batter_hint_keywords):
             planned.append("CricketAgent")
 
-    # Bowler detection
+    # Bowler detection — check local data first
+    bowler_found = False
     for bowler in BOWLER_STATS:
         parts = bowler.split()
         if bowler in query or any(p in query for p in parts if len(p) > 3):
             planned.append("BowlerAgent")
+            bowler_found = True
             break
+
+    # Dynamic bowler detection
+    if not bowler_found:
+        bowler_hint_keywords = [
+            "bowl against", "bowling against", "bowler", "wickets",
+            "how will he bowl", "spell", "threat", "versus", "against"
+        ]
+        if any(keyword in query for keyword in bowler_hint_keywords):
+            planned.append("BowlerAgent")
 
     # Matchup analysis — only if both batter and bowler found
     if "CricketAgent" in planned and "BowlerAgent" in planned:
@@ -105,17 +113,17 @@ async def supervisor_node(state: CricketIQState) -> dict:
     live_keywords = [
         "live match", "live score", "schedule", "upcoming match",
         "completed match", "recent match", "latest result", "won by",
-        "finished yesterday", "result of", "who won", "score"
+        "finished yesterday", "result of", "who won"
     ]
     if not is_historical and any(word in query for word in live_keywords):
         planned.append("LiveMatchAgent")
 
     # Stats query — fire CricketAgent even for unknown players
     stats_keywords = [
-    "stats", "average", "avg", "record", "career", "centuries",
-    "how many runs", "batting average", "batting avg", "ipl",
-    "highest score", "highest", "wickets", "economy", "bowling avg"
-]
+        "stats", "average", "avg", "record", "career", "centuries",
+        "how many runs", "batting average", "batting avg", "ipl",
+        "highest score", "highest", "wickets", "economy", "bowling avg"
+    ]
     if any(word in query for word in stats_keywords):
         if "CricketAgent" not in planned:
             planned.append("CricketAgent")
@@ -124,6 +132,13 @@ async def supervisor_node(state: CricketIQState) -> dict:
     if not planned:
         live_hint_keywords = ["win", "today", "tonight", "match", "playing", "which team"]
         if any(word in query for word in live_hint_keywords):
+            planned.append("LiveMatchAgent")
+
+    # Last resort fallback
+    if not planned:
+        if is_historical:
+            planned.append("CricketAgent")
+        else:
             planned.append("LiveMatchAgent")
 
     print(f"\n[Supervisor] Routing to: {planned}")
@@ -144,18 +159,22 @@ async def bowler_node(state: CricketIQState) -> dict:
     query = state["query"]
     query_lower = query.lower()
 
+    # Check if any local bowlers mentioned
     mentioned_bowlers = [b for b in BOWLER_STATS if b in query_lower]
-    if not mentioned_bowlers:
-        mentioned_bowlers = list(BOWLER_STATS.keys())[:1]
 
-    tasks = [
-        asyncio.to_thread(_bowler_agent.run, f"bowling analysis for {bowler} vs batter in: {query}")
-        for bowler in mentioned_bowlers
-    ]
-    outputs = await asyncio.gather(*tasks)
+    if mentioned_bowlers:
+        # Run local bowlers
+        tasks = [
+            asyncio.to_thread(_bowler_agent.run, f"bowling analysis for {bowler} vs batter in: {query}")
+            for bowler in mentioned_bowlers
+        ]
+        outputs = await asyncio.gather(*tasks)
+        combined = "\n\n".join(outputs)
+    else:
+        # No local bowler found — pass full query to BowlerAgent for dynamic detection
+        combined = await asyncio.to_thread(_bowler_agent.run, query)
 
-    combined = "\n\n".join(outputs)
-    print(f"[BowlerAgent] Done ({len(mentioned_bowlers)} bowler(s)).")
+    print(f"[BowlerAgent] Done.")
     return {"agent_outputs": {"BowlerAgent": combined}}
 
 
@@ -195,12 +214,6 @@ async def impact_node(state: CricketIQState) -> dict:
     return {"agent_outputs": {"ImpactAgent": result}}
 
 
-async def historical_match_node(state: CricketIQState) -> dict:
-    result = await asyncio.to_thread(_historical_match_agent.run, state["query"])
-    print(f"[HistoricalMatchAgent] Done.")
-    return {"agent_outputs": {"HistoricalMatchAgent": result}}
-
-
 # ---------------------------------------------------------------------------
 # AGGREGATOR NODE
 # ---------------------------------------------------------------------------
@@ -236,8 +249,6 @@ async def aggregator_node(state: CricketIQState) -> dict:
         sections.append(f"{len(sections)+1}) Current live match or schedule context.")
     if "ImpactAgent" in active_agents:
         sections.append(f"{len(sections)+1}) Match turning point and key momentum shifts.")
-    if "HistoricalMatchAgent" in active_agents:
-        sections.append(f"{len(sections)+1}) Historical cricket match details and query context.")
 
     sections_text = "\n".join(sections)
 
