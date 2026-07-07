@@ -227,8 +227,32 @@ ANALYST VERDICT:
 {llm_analysis}
 """
 
-    def run(self, task: str) -> str:
+    def run(
+        self,
+        task: str,
+        bowler_name: str | None = None,
+        bowler_stats: dict | None = None
+    ):
+        print("TASK =", task)
+        print("BOWLER_NAME =", bowler_name)
         task_lower = task.lower()
+
+        if bowler_stats is not None:
+            if "error" not in bowler_stats and bowler_stats.get("bowling_stats"):
+                name = bowler_name or bowler_stats.get("name", "Unknown Bowler")
+                return self._analyze_with_real_stats(name, bowler_stats)
+            else:
+                # Fallback directly to local data if available
+                local_bowler = None
+                for bowler in BOWLER_STATS:
+                    parts = bowler.split()
+                    if bowler in task_lower or any(p in task_lower for p in parts if len(p) > 3):
+                        local_bowler = bowler
+                        break
+                if local_bowler:
+                    return self._run_local(local_bowler, task_lower)
+                name = bowler_name or (bowler_stats.get("name") if isinstance(bowler_stats, dict) else None) or self._extract_bowler_name(task_lower)
+                return f"BowlerAgent: Could not find bowling data for '{name}'."
 
         # Check local data first
         local_bowler = None
@@ -245,7 +269,10 @@ ANALYST VERDICT:
             return self._run_local(local_bowler, task_lower)
 
         # Unknown bowler — extract name and try CricAPI
-        search_term = self._extract_bowler_name(task_lower)
+        if bowler_name:
+            search_term = bowler_name
+        else:
+            search_term = self._extract_bowler_name(task_lower)
         print(f"[BowlerAgent] Searching CricAPI for: '{search_term}'")
         real_stats = self._get_real_bowling_stats(search_term) if search_term else None
 

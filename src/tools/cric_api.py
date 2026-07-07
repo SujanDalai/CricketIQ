@@ -1,7 +1,11 @@
 import requests
+import json
+import time
 
 # Module-level cache — persists for the lifetime of the process
 _PLAYER_CACHE: dict = {}
+_PLAYER_ID_CACHE: dict = {}
+_API_BLOCKED_UNTIL: float = 0.0
 
 class CricAPI:
     """
@@ -9,11 +13,25 @@ class CricAPI:
     schedules, and player info.
     """
     BASE_URL = "https://api.cricapi.com/v1"
+    _instance = None
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super(CricAPI, cls).__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
 
     def __init__(self, api_key: str):
+        if getattr(self, "_initialized", False) and self.api_key == api_key:
+            return
         self.api_key = api_key
+        self._initialized = True
 
     def _get(self, endpoint: str, params: dict = None):
+        global _API_BLOCKED_UNTIL
+        if time.time() < _API_BLOCKED_UNTIL:
+            return {"error": "CricAPI rate limit reached: Blocked for 15 minutes", "rate_limit": True}
+
         if not self.api_key:
             return {"error": "No CRIC_API_KEY configured"}
 
@@ -28,7 +46,11 @@ class CricAPI:
             data = response.json()
 
             if data.get("status") != "success":
-                return {"error": data.get("reason", "Unknown API error")}
+                reason = data.get("reason", "Unknown API error")
+                if "Blocked for 15 minutes" in reason or "rate limit" in reason.lower() or "blocked" in reason.lower():
+                    _API_BLOCKED_UNTIL = time.time() + 900  # block for 15 minutes
+                    return {"error": f"CricAPI rate limit reached: {reason}", "rate_limit": True}
+                return {"error": reason}
 
             return data
         except requests.exceptions.RequestException as e:
@@ -86,47 +108,59 @@ class CricAPI:
         # Check cache first
         cache_key = player_name.lower().strip()
         if cache_key in _PLAYER_CACHE:
-            return _PLAYER_CACHE[cache_key]
-        major_nations = {
-            "india", "australia", "england", "pakistan", "new zealand",
-            "south africa", "west indies", "sri lanka", "bangladesh",
-            "zimbabwe", "afghanistan", "ireland"
-        }
+            entry = _PLAYER_CACHE[cache_key]
+            if time.time() - entry["timestamp"] < 3600:
+                return entry["data"]
 
-        # Step 1: search with pagination across 3 pages
-        best = None
-        for offset in [0, 25, 50]:
-            search_result = self._get("players", params={"offset": offset, "search": player_name})
-            if "error" in search_result:
-                break
+        player_id = _PLAYER_ID_CACHE.get(cache_key)
+        player_name_official = None
 
-            players = search_result.get("data", [])
-            for p in players:
-                name_match = player_name.lower() in p.get("name", "").lower()
-                country = p.get("country", "").lower()
-                if name_match and country in major_nations:
-                    best = p
-                    break
+        if not player_id:
+            major_nations = {
+                "india", "australia", "england", "pakistan", "new zealand",
+                "south africa", "west indies", "sri lanka", "bangladesh",
+                "zimbabwe", "afghanistan", "ireland"
+            }
 
-            if best:
-                break
+            # Step 1: search with pagination across 3 pages
+            best = None
+            for offset in [0, 25, 50]:
+                search_result = self._get("players", params={"offset": offset, "search": player_name})
+                print("\nSEARCHING:", player_name)
+                print(json.dumps(search_result, indent=2)[:3000])
+                if "error" in search_result:
+                    return search_result
 
-        # Fallback — try last name only
-        if not best:
-            parts = player_name.strip().split()
-            if len(parts) > 1:
-                fallback = self._get("players", params={"offset": 0, "search": parts[-1]})
-                players = fallback.get("data", []) if "error" not in fallback else []
+                players = search_result.get("data", [])
                 for p in players:
-                    if player_name.lower() in p.get("name", "").lower() and p.get("country", "").lower() in major_nations:
+                    name_match = player_name.lower() in p.get("name", "").lower()
+                    country = p.get("country", "").lower()
+                    if name_match and country in major_nations:
                         best = p
                         break
 
-        if not best:
-            return {"error": f"No player found for '{player_name}'"}
+                if best:
+                    break
 
-        player_id = best["id"]
-        player_name_official = best["name"]
+            # Fallback — try last name only
+            if not best:
+                parts = player_name.strip().split()
+                if len(parts) > 1:
+                    fallback = self._get("players", params={"offset": 0, "search": parts[-1]})
+                    if "error" in fallback:
+                        return fallback
+                    players = fallback.get("data", [])
+                    for p in players:
+                        if player_name.lower() in p.get("name", "").lower() and p.get("country", "").lower() in major_nations:
+                            best = p
+                            break
+
+            if not best:
+                return {"error": f"No player found for '{player_name}'"}
+
+            player_id = best["id"]
+            player_name_official = best["name"]
+            _PLAYER_ID_CACHE[cache_key] = player_id
 
         # Step 2: fetch full player info
         info_result = self._get("players_info", params={"id": player_id})
@@ -135,6 +169,19 @@ class CricAPI:
 
         data = info_result.get("data", {})
         stats = data.get("stats", [])
+        if not player_name_official:
+            player_name_official = data.get("name", player_name.title())
+
+        print("=" * 60)
+        print("PLAYER:", player_name_official)
+        print("ROLE:", data.get("role"))
+        print("COUNTRY:", data.get("country"))
+        print("TOTAL STATS:", len(stats))
+
+        for s in stats[:20]:
+            print(s)
+
+        print("=" * 60)
 
         # Step 3: parse batting stats
         batting_parsed = {}
@@ -182,5 +229,8 @@ class CricAPI:
             "batting_stats": batting_parsed,
             "bowling_stats": bowling_parsed,
         }
-        _PLAYER_CACHE[cache_key] = res
+        _PLAYER_CACHE[cache_key] = {
+            "timestamp": time.time(),
+            "data": res
+        }
         return res

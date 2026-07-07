@@ -1,4 +1,7 @@
+import time
 import requests
+
+_WEATHER_CACHE: dict = {}
 
 
 class WeatherAPI:
@@ -15,6 +18,12 @@ class WeatherAPI:
         Returns a dict with temperature, humidity, wind speed, and conditions,
         or an error dict if the request fails.
         """
+        city_key = city.lower().strip()
+        if city_key in _WEATHER_CACHE:
+            entry = _WEATHER_CACHE[city_key]
+            if time.time() - entry["timestamp"] < 900:  # 15 minutes = 900 seconds
+                return entry["data"]
+
         if not self.api_key:
             return {"error": "No WEATHER_API_KEY configured"}
 
@@ -29,7 +38,7 @@ class WeatherAPI:
             response.raise_for_status()
             data = response.json()
 
-            return {
+            res = {
                 "city": data.get("name", city),
                 "temperature_c": data["main"]["temp"],
                 "feels_like_c": data["main"]["feels_like"],
@@ -38,6 +47,11 @@ class WeatherAPI:
                 "condition": data["weather"][0]["main"],
                 "description": data["weather"][0]["description"],
             }
+            _WEATHER_CACHE[city_key] = {
+                "timestamp": time.time(),
+                "data": res
+            }
+            return res
         except requests.exceptions.RequestException as e:
             return {"error": f"Weather API request failed: {str(e)}"}
         except (KeyError, IndexError) as e:

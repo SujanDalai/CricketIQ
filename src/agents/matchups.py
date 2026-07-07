@@ -150,7 +150,12 @@ Format: {fmt}
 {analysis}
 """
 
-    def run(self, task: str) -> str:
+    def run(
+        self,
+        task: str,
+        batter_stats: dict | None = None,
+        bowler_stats: dict | None = None
+    ) -> str:
         task_lower = task.lower()
 
         # Find batter
@@ -246,24 +251,33 @@ TACTICAL ANALYSIS:
         if not batter_search and not bowler_search:
             return "MatchupAgent: Could not identify batter and bowler in the query."
 
-        # Fetch real stats from CricAPI
-        batter_stats = None
-        bowler_stats = None
+        # Fetch real stats from CricAPI or use pre-fetched
+        resolved_batter_stats = None
+        if batter_stats is not None:
+            if "error" not in batter_stats and batter_stats.get("batting_stats"):
+                resolved_batter_stats = batter_stats
+                batter_search = batter_stats.get("name", batter_search)
+        else:
+            if batter_search:
+                result = self.cric_api.get_player_stats(batter_search)
+                if "error" not in result:
+                    resolved_batter_stats = result
 
-        if batter_search:
-            result = self.cric_api.get_player_stats(batter_search)
-            if "error" not in result:
-                batter_stats = result
-
-        if bowler_search:
-            result = self.cric_api.get_player_stats(bowler_search)
-            if "error" not in result:
-                bowler_stats = result
+        resolved_bowler_stats = None
+        if bowler_stats is not None:
+            if "error" not in bowler_stats and bowler_stats.get("bowling_stats"):
+                resolved_bowler_stats = bowler_stats
+                bowler_search = bowler_stats.get("name", bowler_search)
+        else:
+            if bowler_search:
+                result = self.cric_api.get_player_stats(bowler_search)
+                if "error" not in result:
+                    resolved_bowler_stats = result
 
         return self._llm_matchup(
             batter_search or "Unknown Batter",
             bowler_search or "Unknown Bowler",
             venue, fmt,
-            batter_stats,
-            bowler_stats
+            resolved_batter_stats,
+            resolved_bowler_stats
         )

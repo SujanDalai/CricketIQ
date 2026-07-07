@@ -155,24 +155,46 @@ class CricketAgent(BaseAgent):
 
         return " ".join(words[:2])
 
-    def run(self, task: str) -> str:
+    def run(self, task: str, player_name: str | None = None, batter_stats: dict | None = None) -> str:
         task_lower = task.lower()
+        real_stats = None
 
-        # Detect player name from local data keys first
-        player_name = None
-        for name in PLAYER_STATS.keys():
-            parts = name.split()
-            if name in task_lower or any(p in task_lower for p in parts if len(p) > 3):
-                player_name = name
-                break
-
-        # Try real API stats
-        if player_name:
-            real_stats = self._get_real_stats(player_name)
+        if batter_stats is not None:
+            if "error" not in batter_stats and batter_stats.get("batting_stats"):
+                real_stats = batter_stats
+                player_name = real_stats.get("name", player_name)
+            else:
+                real_stats = None
+                if not player_name and isinstance(batter_stats, dict) and batter_stats.get("name"):
+                    player_name = batter_stats["name"]
         else:
-            search_term = self._extract_player_name(task_lower)
-            print(f"[CricketAgent] Searching CricAPI for: '{search_term}'")
-            real_stats = self._get_real_stats(search_term) if search_term else None
+            if not player_name:
+                player_name = None
+
+            # If workflow already knows the batter, use it.
+            if player_name is None:
+
+                # First look for the FULL NAME
+                for name in PLAYER_STATS.keys():
+                    if name.lower() in task_lower:
+                        player_name = name
+                        break
+
+                # Only if no full name is found, try partial matching
+                if player_name is None:
+                    for name in PLAYER_STATS.keys():
+                        parts = name.split()
+                        if any(p in task_lower for p in parts if len(p) > 3):
+                            player_name = name
+                            break
+
+            # Try real API stats
+            if player_name:
+                real_stats = self._get_real_stats(player_name)
+            else:
+                search_term = self._extract_player_name(task_lower)
+                print(f"[CricketAgent] Searching CricAPI for: '{search_term}'")
+                real_stats = self._get_real_stats(search_term) if search_term else None
 
             if real_stats:
                 bs = self._clean_stats(real_stats["batting_stats"])

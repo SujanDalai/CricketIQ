@@ -6,6 +6,8 @@ from src.config import Config
 
 @patch("src.tools.cric_api.requests.get")
 def test_cric_api(mock_get):
+    import src.tools.cric_api
+    src.tools.cric_api._API_BLOCKED_UNTIL = 0.0
     # Mocking the HTTP response
     mock_response = MagicMock()
     mock_response.json.return_value = {
@@ -117,4 +119,85 @@ def test_cricbuzz_scraper(mock_get):
     assert match["date"] == "Completed"
     assert match["teams"] == ["New Zealand", "England"]
     assert match["score"] == "New Zealand 438 & 288-9 d vs England 354 & 212"
+
+
+@patch("src.tools.cric_api.CricAPI._get")
+def test_get_player_stats_ttl_cache(mock_get):
+    import src.tools.cric_api
+    import time
+
+    src.tools.cric_api._API_BLOCKED_UNTIL = 0.0
+    src.tools.cric_api._PLAYER_CACHE.clear()
+    src.tools.cric_api._PLAYER_ID_CACHE.clear()
+
+    mock_get.side_effect = [
+        {
+            "status": "success",
+            "data": [
+                {
+                    "id": "player-123",
+                    "name": "Virat Kohli",
+                    "country": "India"
+                }
+            ]
+        },
+        {
+            "status": "success",
+            "data": {
+                "id": "player-123",
+                "name": "Virat Kohli",
+                "country": "India",
+                "role": "Batter",
+                "dateOfBirth": "1988-11-05",
+                "stats": [
+                    {
+                        "matchtype": "odi",
+                        "stat": "avg",
+                        "value": "58.6",
+                        "fn": "batting"
+                    }
+                ]
+            }
+        },
+        {
+            "status": "success",
+            "data": {
+                "id": "player-123",
+                "name": "Virat Kohli",
+                "country": "India",
+                "role": "Batter",
+                "dateOfBirth": "1988-11-05",
+                "stats": [
+                    {
+                        "matchtype": "odi",
+                        "stat": "avg",
+                        "value": "59.2",
+                        "fn": "batting"
+                    }
+                ]
+            }
+        }
+    ]
+
+    api = CricAPI("dummy_key")
+
+    res1 = api.get_player_stats("Virat Kohli")
+    assert res1["name"] == "Virat Kohli"
+    assert res1["batting_stats"]["odi"]["avg"] == "58.6"
+    assert mock_get.call_count == 2
+
+    res2 = api.get_player_stats("Virat Kohli")
+    assert res2["name"] == "Virat Kohli"
+    assert res2["batting_stats"]["odi"]["avg"] == "58.6"
+    assert mock_get.call_count == 2
+
+    cache_key = "virat kohli"
+    assert cache_key in src.tools.cric_api._PLAYER_CACHE
+    src.tools.cric_api._PLAYER_CACHE[cache_key]["timestamp"] = time.time() - 3601
+
+    res3 = api.get_player_stats("Virat Kohli")
+    assert res3["name"] == "Virat Kohli"
+    assert res3["batting_stats"]["odi"]["avg"] == "59.2"
+    assert mock_get.call_count == 3
+
 

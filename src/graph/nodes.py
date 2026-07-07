@@ -10,6 +10,7 @@ LangGraph merges returned dicts back into the shared state automatically.
 """
 
 import asyncio
+import json
 from src.llm.client import invoke_llm
 from src.graph.state import CricketIQState
 from src.tools.cricket_data import PLAYER_STATS, BOWLER_STATS, PITCH_CONDITIONS
@@ -40,171 +41,100 @@ _cric_api                = CricAPI(Config().CRIC_API_KEY)
 
 
 # ---------------------------------------------------------------------------
-# ROLE DETECTION HELPER
-# ---------------------------------------------------------------------------
-
-def _identify_vs_roles(query: str) -> tuple[str, str]:
-    """
-    For 'X vs Y' queries, return (batter_query_hint, bowler_query_hint)
-    by checking CricAPI role field. Uses cache so no extra API calls
-    if players were already fetched.
-    Returns ("", "") if can't determine.
-    """
-    for vs_kw in [" vs ", " versus ", " v/s "]:
-        if vs_kw in query:
-            left = query.split(vs_kw)[0].strip()
-            right = query.split(vs_kw)[-1].strip()
-
-            skip_tail = {"test", "odi", "t20", "t20i", "lords", "perth",
-                         "mumbai", "sydney", "melbourne", "brisbane"}
-            right_words = [w for w in right.split() if w not in skip_tail]
-            right = " ".join(right_words[:2])
-
-            left_stats = _cric_api.get_player_stats(left)
-            right_stats = _cric_api.get_player_stats(right)
-
-            left_role = left_stats.get("role", "").lower() if "error" not in left_stats else ""
-            right_role = right_stats.get("role", "").lower() if "error" not in right_stats else ""
-
-            left_is_bowler = "bowl" in left_role and "bat" not in left_role
-            right_is_bowler = "bowl" in right_role and "bat" not in right_role
-            left_is_batter = "bat" in left_role or "keeper" in left_role
-            right_is_batter = "bat" in right_role or "keeper" in right_role
-
-            if left_is_bowler and right_is_batter:
-                return right, left  # (batter, bowler)
-            elif right_is_bowler and left_is_batter:
-                return left, right  # (batter, bowler)
-            else:
-                # Can't determine roles — return empty, nodes will use positional logic
-                return "", ""
-
-    return "", ""
-
-
-# ---------------------------------------------------------------------------
 # SUPERVISOR NODE
 # ---------------------------------------------------------------------------
 
 async def supervisor_node(state: CricketIQState) -> dict:
-    query = state["query"].lower()
-    planned = []
-    vs_batter_hint = ""
-    vs_bowler_hint = ""
+    query = state["query"]
+    query_lower = query.lower()
 
-    # Historical query check — do this FIRST
     historical_keywords = [
         "2003", "2007", "2008", "2009", "2010", "2011", "2012", "2013",
         "2014", "2015", "2016", "2017", "2018", "2019", "2020", "2021",
         "2022", "2023", "scorecard", "semifinal", "world cup"
     ]
-    is_historical = any(word in query for word in historical_keywords)
+    is_historical = any(word in query_lower for word in historical_keywords)
 
-    # "X vs Y" pattern — use CricAPI roles to assign correctly
-    vs_keywords = [" vs ", " versus ", " v/s "]
-    if any(kw in query for kw in vs_keywords):
-        vs_batter_hint, vs_bowler_hint = await asyncio.to_thread(
-            _identify_vs_roles, query
-        )
-        if "CricketAgent" not in planned:
-            planned.append("CricketAgent")
-        if "BowlerAgent" not in planned:
-            planned.append("BowlerAgent")
+    classification = await asyncio.to_thread(
+        invoke_llm,
+        system_prompt=(
+            "You are a cricket query classifier. Analyze the query and return a JSON object.\n"
+            "Fields:\n"
+            "- 'batter': full name of the batter in the query (null if none)\n"
+            "- 'bowler': full name of the bowler in the query (null if none)\n"
+            "- 'venue': venue/ground name (null if none)\n"
+            "- 'format': 'Test', 'ODI', 'T20I', or null\n"
+            "- 'intent': one of: 'player_stats', 'matchup', 'live_scores', 'pitch_weather', 'impact_analysis', 'general'\n"
+            "- 'is_live': true if asking about current/live/recent matches\n"
+            "- 'is_historical': true if asking about past matches with specific years\n\n"
+            "For 'X vs Y' queries, use cricket knowledge to determine who is batter and bowler.\n"
+            "Examples:\n"
+            "- 'Malinga vs Sachin' → batter='Sachin Tendulkar', bowler='Lasith Malinga'\n"
+            "- 'Kohli vs Starc' → batter='Virat Kohli', bowler='Mitchell Starc'\n"
+            "- 'Bhuvneshwar vs Abhishek Sharma' → batter='Abhishek Sharma', bowler='Bhuvneshwar Kumar'\n"
+            "- 'show me live scores' → intent='live_scores', is_live=true\n"
+            "- 'how is kohli batting' → intent='player_stats', batter='Virat Kohli'\n"
+            "- 'what was the turning point in today match' → intent='impact_analysis'\n"
+            "Return ONLY valid JSON, no explanation, no markdown backticks."
+        ),
+        user_prompt=f"Query: {query}"
+    )
 
-    # Batter detection — check local data first
-    batter_found = False
-    for player in PLAYER_STATS:
-        parts = player.split()
-        if player in query or any(p in query for p in parts if len(p) > 3):
-            if "CricketAgent" not in planned:
-                planned.append("CricketAgent")
-            batter_found = True
-            break
+    try:
+        clean = classification.strip().strip("```json").strip("```").strip()
+        parsed = json.loads(clean)
+    except Exception:
+        parsed = {}
 
-    # Dynamic batter detection
-    if not batter_found and "CricketAgent" not in planned:
-        batter_hint_keywords = [
-            "play against", "score against", "bat against", "face",
-            "will he score", "will she score", "how will", "can he",
-            "batter", "batsman", "batsmen", "opener", "middle order"
-        ]
-        if any(keyword in query for keyword in batter_hint_keywords):
-            planned.append("CricketAgent")
+    batter = parsed.get("batter")
+    bowler = parsed.get("bowler")
+    venue = parsed.get("venue")
+    intent = parsed.get("intent", "general")
+    is_live = parsed.get("is_live", False)
 
-    # Bowler detection — check local data first
-    bowler_found = False
-    for bowler in BOWLER_STATS:
-        parts = bowler.split()
-        if bowler in query or any(p in query for p in parts if len(p) > 3):
-            if "BowlerAgent" not in planned:
-                planned.append("BowlerAgent")
-            bowler_found = True
-            break
+    print(f"[Supervisor] Intent: {intent} | Batter: {batter} | Bowler: {bowler} | Venue: {venue}")
 
-    # Dynamic bowler detection
-    if not bowler_found and "BowlerAgent" not in planned:
-        bowler_hint_keywords = [
-            "bowl against", "bowling against", "bowler", "wickets",
-            "how will he bowl", "spell", "threat", "against"
-        ]
-        if any(keyword in query for keyword in bowler_hint_keywords):
-            planned.append("BowlerAgent")
+    planned = []
+    vs_batter_hint = batter or ""
+    vs_bowler_hint = bowler or ""
 
-    # Matchup analysis — only if both batter and bowler found
-    if "CricketAgent" in planned and "BowlerAgent" in planned:
+    if intent == "player_stats" or batter:
+        planned.append("CricketAgent")
+
+    if intent == "matchup" or bowler:
+        planned.append("BowlerAgent")
+
+    if batter and bowler:
         planned.append("MatchupAgent")
         planned.append("MatchupPredictorAgent")
 
-    # Impact detection — only for non-historical queries
-    impact_keywords = [
-        "turning point", "impact over", "impact overs",
-        "when did", "momentum shift", "match change",
-    ]
-    if not is_historical and any(keyword in query for keyword in impact_keywords):
+    if intent == "impact_analysis":
         planned.append("ImpactAgent")
 
-    # Venue detection
-    for venue in PITCH_CONDITIONS:
-        if venue in query:
-            planned.append("WeatherAgent")
-            planned.append("PitchAgent")
-            break
+    if venue:
+        planned.append("WeatherAgent")
+        planned.append("PitchAgent")
 
-    # Live match detection — only if not historical
-    live_keywords = [
-        "live match", "live score", "schedule", "upcoming match",
-        "completed match", "recent match", "latest result", "won by",
-        "finished yesterday", "result of", "who won"
-    ]
-    if not is_historical and any(word in query for word in live_keywords):
+    if (is_live or intent == "live_scores") and not is_historical:
         planned.append("LiveMatchAgent")
 
-    # Stats query — fire CricketAgent even for unknown players
-    stats_keywords = [
-        "stats", "average", "avg", "record", "career", "centuries",
-        "how many runs", "batting average", "batting avg", "ipl",
-        "highest score", "highest", "wickets", "economy", "bowling avg"
-    ]
-    if any(word in query for word in stats_keywords):
-        if "CricketAgent" not in planned:
-            planned.append("CricketAgent")
+    if is_historical and not planned:
+        planned.append("CricketAgent")
 
-    # Fallback for general match questions
     if not planned:
-        live_hint_keywords = ["win", "today", "tonight", "match", "playing", "which team"]
-        if any(word in query for word in live_hint_keywords):
-            planned.append("LiveMatchAgent")
+        planned.append("LiveMatchAgent")
 
-    # Last resort fallback
-    if not planned:
-        if is_historical:
-            planned.append("CricketAgent")
-        else:
-            planned.append("LiveMatchAgent")
+    planned = list(dict.fromkeys(planned))
 
-    print(f"\n[Supervisor] Routing to: {planned}")
+    print(f"[Supervisor] Routing to: {planned}")
 
-    result = {"planned_agents": planned}
+    result = {
+        "planned_agents": planned,
+        "batter_name": batter or "",
+        "bowler_name": bowler or "",
+        "venue": venue or "Unknown",
+        "format": parsed.get("format") or "Overall Career",
+    }
     if vs_batter_hint:
         result["vs_batter_hint"] = vs_batter_hint
     if vs_bowler_hint:
@@ -220,66 +150,180 @@ async def cricket_node(state: CricketIQState) -> dict:
     query = state["query"]
     query_lower = query.lower()
     vs_hint = state.get("vs_batter_hint", "")
+    batter_stats = state.get("batter_stats")
+    print(f"[CricketNode] vs_batter_hint from state: '{vs_hint}'")
 
-    if vs_hint:
-        run_query = f"batting analysis for {vs_hint} in: {query}"
-    else:
-        # For vs queries, pass left side explicitly as batter
-        run_query = query
-        for vs_kw in [" vs ", " versus ", " v/s "]:
-            if vs_kw in query_lower:
-                left_side = query_lower.split(vs_kw)[0].strip()
-                run_query = f"batting analysis for {left_side} in: {query}"
+    # Resolve batter name if missing
+    if not vs_hint:
+        for name in PLAYER_STATS.keys():
+            if name.lower() in query_lower:
+                vs_hint = name
                 break
+        if not vs_hint:
+            for name in PLAYER_STATS.keys():
+                parts = name.split()
+                if any(p in query_lower for p in parts if len(p) > 3):
+                    vs_hint = name
+                    break
+        if not vs_hint:
+            vs_hint = _cricket_agent._extract_player_name(query_lower)
 
-    result = await asyncio.to_thread(_cricket_agent.run, run_query)
+    # Fetch stats if missing
+    if vs_hint and (not batter_stats or "error" in batter_stats):
+        res = _cric_api.get_player_stats(vs_hint)
+        if "error" not in res:
+            batter_stats = res
+
+    result = await asyncio.to_thread(
+        _cricket_agent.run,
+        task=query,
+        player_name=vs_hint,
+        batter_stats=batter_stats
+    )
     print(f"[CricketAgent] Done.")
-    return {"agent_outputs": {"CricketAgent": result}}
+    return {
+        "agent_outputs": {"CricketAgent": result},
+        "batter_stats": batter_stats
+    }
 
 
 async def bowler_node(state: CricketIQState) -> dict:
     query = state["query"]
     query_lower = query.lower()
     vs_hint = state.get("vs_bowler_hint", "")
+    bowler_stats = state.get("bowler_stats")
+    print(f"[BowlerNode] vs_bowler_hint from state: '{vs_hint}'")
 
     mentioned_bowlers = [b for b in BOWLER_STATS if b in query_lower]
 
     if mentioned_bowlers:
-        tasks = [
-            asyncio.to_thread(_bowler_agent.run, f"bowling analysis for {bowler} vs batter in: {query}")
-            for bowler in mentioned_bowlers
-        ]
+        # Pre-fetch if bowler_stats is missing for the first mentioned bowler
+        first_bowler = mentioned_bowlers[0]
+        if not bowler_stats or "error" in bowler_stats:
+            res = _cric_api.get_player_stats(first_bowler)
+            if "error" not in res:
+                bowler_stats = res
+
+        tasks = []
+        for bowler in mentioned_bowlers:
+            cached_stats = None
+            if bowler_stats and bowler.lower() in bowler_stats.get("name", "").lower():
+                cached_stats = bowler_stats
+            tasks.append(
+                asyncio.to_thread(
+                    _bowler_agent.run,
+                    task=query,
+                    bowler_name=bowler,
+                    bowler_stats=cached_stats
+                )
+            )
         outputs = await asyncio.gather(*tasks)
         combined = "\n\n".join(outputs)
-    elif vs_hint:
+        print(f"[BowlerAgent] Done.")
+        return {
+            "agent_outputs": {"BowlerAgent": combined},
+            "bowler_stats": bowler_stats
+        }
+    else:
+        # Fallback to vs_hint or resolve bowler name
+        if not vs_hint:
+            for bowler in BOWLER_STATS:
+                parts = bowler.split()
+                if bowler in query_lower or any(p in query_lower for p in parts if len(p) > 3):
+                    vs_hint = bowler
+                    break
+            if not vs_hint:
+                vs_hint = _bowler_agent._extract_bowler_name(query_lower)
+
+        if vs_hint and (not bowler_stats or "error" in bowler_stats):
+            res = _cric_api.get_player_stats(vs_hint)
+            if "error" not in res:
+                bowler_stats = res
+
         combined = await asyncio.to_thread(
             _bowler_agent.run,
-            f"bowling analysis for {vs_hint} in: {query}"
+            task=query,
+            bowler_name=vs_hint,
+            bowler_stats=bowler_stats
         )
-    else:
-        # For vs queries, pass right side explicitly as bowler
-        run_query = query
-        for vs_kw in [" vs ", " versus ", " v/s "]:
-            if vs_kw in query_lower:
-                right_side = query_lower.split(vs_kw)[-1].strip()
-                run_query = f"bowling analysis for {right_side} in: {query}"
-                break
-        combined = await asyncio.to_thread(_bowler_agent.run, run_query)
-
-    print(f"[BowlerAgent] Done.")
-    return {"agent_outputs": {"BowlerAgent": combined}}
+        print(f"[BowlerAgent] Done.")
+        return {
+            "agent_outputs": {"BowlerAgent": combined},
+            "bowler_stats": bowler_stats
+        }
 
 
 async def matchup_node(state: CricketIQState) -> dict:
-    result = await asyncio.to_thread(_matchup_agent.run, state["query"])
+    query = state["query"]
+    query_lower = query.lower()
+    
+    batter = state.get("vs_batter_hint", "")
+    bowler = state.get("vs_bowler_hint", "")
+    batter_stats = state.get("batter_stats")
+    bowler_stats = state.get("bowler_stats")
+
+    # Resolve names if missing
+    if not batter or not bowler:
+        ext_batter, ext_bowler = _matchup_predictor_agent._extract_names(query_lower)
+        if not batter:
+            batter = ext_batter
+        if not bowler:
+            bowler = ext_bowler
+
+    result = await asyncio.to_thread(
+        _matchup_agent.run,
+        task=query,
+        batter_stats=batter_stats,
+        bowler_stats=bowler_stats
+    )
     print(f"[MatchupAgent] Done.")
-    return {"agent_outputs": {"MatchupAgent": result}}
+    return {
+        "agent_outputs": {"MatchupAgent": result}
+    }
 
 
 async def matchup_predictor_node(state: CricketIQState) -> dict:
-    result = await asyncio.to_thread(_matchup_predictor_agent.run, state["query"])
+    query = state["query"]
+    query_lower = query.lower()
+
+    batter = state.get("vs_batter_hint", "")
+    bowler = state.get("vs_bowler_hint", "")
+    batter_stats = state.get("batter_stats")
+    bowler_stats = state.get("bowler_stats")
+    venue = state.get("venue", "Unknown")
+    fmt = state.get("format", "Overall Career")
+
+    # Resolve names if missing
+    if not batter or not bowler:
+        ext_batter, ext_bowler = _matchup_predictor_agent._extract_names(query_lower)
+        if not batter:
+            batter = ext_batter
+        if not bowler:
+            bowler = ext_bowler
+
+    result = await asyncio.to_thread(
+        _matchup_predictor_agent.run,
+        task=query,
+        batter_name=batter,
+        bowler_name=bowler,
+        batter_stats=batter_stats,
+        bowler_stats=bowler_stats,
+        venue=venue,
+        format=fmt
+    )
     print(f"[MatchupPredictorAgent] Done.")
-    return {"agent_outputs": {"MatchupPredictorAgent": result}}
+    return {
+        "agent_outputs": {"MatchupPredictorAgent": result}
+    }
+
+
+async def stage_1_join_node(state: CricketIQState) -> dict:
+    """
+    Pass-through join node representing the completion of Stage 1 processing.
+    Ensures all Stage 1 parallel branches have completed before routing to Stage 2.
+    """
+    print("[Stage 1 Join] Stage 1 complete.")
+    return {}
 
 
 async def weather_node(state: CricketIQState) -> dict:

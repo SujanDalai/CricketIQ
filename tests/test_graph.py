@@ -15,7 +15,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 
 from src.graph.state import CricketIQState
-from src.graph.router import route_to_agents, AGENT_TO_NODE
+from src.graph.router import route_to_agents, route_to_stage_2_agents, AGENT_TO_NODE
 from src.graph.nodes import supervisor_node, cricket_node, pitch_node, aggregator_node
 from src.graph.workflow import build_graph
 
@@ -58,8 +58,19 @@ class TestRouter:
 
     def test_all_agents_map_correctly(self):
         state = make_state(planned_agents=list(AGENT_TO_NODE.keys()))
-        result = route_to_agents(state)
-        assert set(result) == set(AGENT_TO_NODE.values())
+        result1 = route_to_agents(state)
+        result2 = route_to_stage_2_agents(state)
+
+        stage_1_nodes = {
+            "cricket_node", "bowler_node", "weather_node", "pitch_node",
+            "live_match_node", "impact_node", "historical_match_node"
+        }
+        stage_2_nodes = {
+            "matchup_node", "matchup_predictor_node"
+        }
+
+        assert set(result1) == stage_1_nodes
+        assert set(result2) == stage_2_nodes
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +78,9 @@ class TestRouter:
 # ---------------------------------------------------------------------------
 
 class TestSupervisorNode:
-    def test_supervisor_returns_planned_agents(self):
+    @patch("src.graph.nodes.invoke_llm")
+    def test_supervisor_returns_planned_agents(self, mock_invoke):
+        mock_invoke.return_value = '{"batter": "Virat Kohli", "bowler": "Mitchell Starc", "venue": "Perth", "format": "ODI", "intent": "matchup", "is_live": true, "is_historical": false}'
         # Query with Virat Kohli, Mitchell Starc, and Perth
         state = make_state(query="Will Virat Kohli score vs Mitchell Starc at Perth?")
         result = asyncio.run(supervisor_node(state))
@@ -82,7 +95,9 @@ class TestSupervisorNode:
         assert "PitchAgent" in planned
         assert "LiveMatchAgent" in planned  # due to "score"
 
-    def test_supervisor_only_venue(self):
+    @patch("src.graph.nodes.invoke_llm")
+    def test_supervisor_only_venue(self, mock_invoke):
+        mock_invoke.return_value = '{"batter": null, "bowler": null, "venue": "Mumbai", "format": null, "intent": "pitch_weather", "is_live": false, "is_historical": false}'
         # Query with only Mumbai venue
         state = make_state(query="How is the pitch at Mumbai?")
         result = asyncio.run(supervisor_node(state))
@@ -94,12 +109,14 @@ class TestSupervisorNode:
         assert "CricketAgent" not in planned
         assert "BowlerAgent" not in planned
 
-    def test_supervisor_empty_query(self):
+    @patch("src.graph.nodes.invoke_llm")
+    def test_supervisor_empty_query(self, mock_invoke):
+        mock_invoke.return_value = '{"batter": null, "bowler": null, "venue": null, "format": null, "intent": "general", "is_live": false, "is_historical": false}'
         state = make_state(query="general analysis")
         result = asyncio.run(supervisor_node(state))
         
         assert "planned_agents" in result
-        assert result["planned_agents"] == []
+        assert result["planned_agents"] == ["LiveMatchAgent"]
 
 
 
