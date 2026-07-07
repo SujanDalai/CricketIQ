@@ -27,6 +27,8 @@ class CricketIQState(TypedDict):
         Uses operator.or_ so each node can merge its result without
         overwriting other agents' outputs.
     final_report : str
+    vs_batter_hint: str
+    vs_bowler_hint: str
         The finished CricketIQ report, written by the aggregator node.
     """
     query: str

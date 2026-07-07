@@ -95,13 +95,11 @@ class CricketAgent(BaseAgent):
         Extract a likely batter name from the query by removing
         known non-player words and known bowler names.
         """
-        # All known bowler name parts to exclude
         bowler_words = set()
         for bowler in BOWLER_STATS.keys():
             for part in bowler.split():
                 bowler_words.add(part.lower())
 
-        # General skip words
         skip_words = {
             "stats", "average", "record", "career", "ipl", "t20", "odi", "test",
             "how", "many", "runs", "what", "are", "is", "the", "in", "of", "at",
@@ -112,16 +110,41 @@ class CricketAgent(BaseAgent):
             "edgbaston", "oval", "wankhede", "eden", "gardens", "versus", "vs",
             "today", "tomorrow", "series", "tour", "india", "australia", "england",
             "pakistan", "africa", "zealand", "indies", "lanka", "bangladesh",
-        "should", "would", "could", "shall", "might", "must", "need",
-"want", "going", "trying", "looking", "planning", "thinking",
-"approach", "handle", "tackle", "deal", "bat", "bowl",}
+            "should", "would", "could", "shall", "might", "must", "need",
+            "want", "going", "trying", "looking", "planning", "thinking",
+            "approach", "handle", "tackle", "deal", "bat", "bowl",
+        }
 
-        # Combine both sets
         all_skip = skip_words | bowler_words
 
+        # Handle "X vs Y" pattern — batter is before "vs"
+        for vs_kw in [" vs ", " versus ", " v/s "]:
+            if vs_kw in task_lower:
+                before_vs = task_lower.split(vs_kw)[0].strip()
+                vs_words = []
+                for w in before_vs.split():
+                    cleaned = w.rstrip(".,!?")
+                    if cleaned and cleaned not in all_skip and len(cleaned) > 2:
+                        vs_words.append(cleaned)
+                if vs_words:
+                    return " ".join(vs_words[-2:])
+
+        # Handle "against" pattern
+        if "against" in task_lower:
+            before_against = task_lower.split("against")[0]
+            against_words = []
+            for w in before_against.split():
+                cleaned = w.rstrip(".,!?")
+                if cleaned.endswith("'s"):
+                    cleaned = cleaned[:-2]
+                if cleaned and cleaned not in all_skip and len(cleaned) > 3:
+                    against_words.append(cleaned)
+            if against_words:
+                return " ".join(against_words[-2:])
+
+        # General extraction
         words = []
         for w in task_lower.split():
-            # Only strip possessive 's at the end, not the letter s
             cleaned = w.rstrip(".,!?")
             if cleaned.endswith("'s"):
                 cleaned = cleaned[:-2]
@@ -130,8 +153,7 @@ class CricketAgent(BaseAgent):
             if cleaned and cleaned not in all_skip and len(cleaned) > 3:
                 words.append(cleaned)
 
-        return " ".join(words[:2])  # first 2 meaningful words = likely player name
-
+        return " ".join(words[:2])
 
     def run(self, task: str) -> str:
         task_lower = task.lower()
@@ -148,7 +170,6 @@ class CricketAgent(BaseAgent):
         if player_name:
             real_stats = self._get_real_stats(player_name)
         else:
-            # Unknown player — extract name dynamically
             search_term = self._extract_player_name(task_lower)
             print(f"[CricketAgent] Searching CricAPI for: '{search_term}'")
             real_stats = self._get_real_stats(search_term) if search_term else None

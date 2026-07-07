@@ -13,6 +13,8 @@ import asyncio
 from src.llm.client import invoke_llm
 from src.graph.state import CricketIQState
 from src.tools.cricket_data import PLAYER_STATS, BOWLER_STATS, PITCH_CONDITIONS
+from src.tools.cric_api import CricAPI
+from src.config import Config
 
 from src.agents.cricket import CricketAgent
 from src.agents.bowler import BowlerAgent
@@ -34,6 +36,50 @@ _pitch_agent             = PitchAgent()
 _live_match_agent        = LiveMatchAgent()
 _matchup_predictor_agent = MatchupPredictorAgent()
 _impact_agent            = ImpactAgent()
+_cric_api                = CricAPI(Config().CRIC_API_KEY)
+
+
+# ---------------------------------------------------------------------------
+# ROLE DETECTION HELPER
+# ---------------------------------------------------------------------------
+
+def _identify_vs_roles(query: str) -> tuple[str, str]:
+    """
+    For 'X vs Y' queries, return (batter_query_hint, bowler_query_hint)
+    by checking CricAPI role field. Uses cache so no extra API calls
+    if players were already fetched.
+    Returns ("", "") if can't determine.
+    """
+    for vs_kw in [" vs ", " versus ", " v/s "]:
+        if vs_kw in query:
+            left = query.split(vs_kw)[0].strip()
+            right = query.split(vs_kw)[-1].strip()
+
+            skip_tail = {"test", "odi", "t20", "t20i", "lords", "perth",
+                         "mumbai", "sydney", "melbourne", "brisbane"}
+            right_words = [w for w in right.split() if w not in skip_tail]
+            right = " ".join(right_words[:2])
+
+            left_stats = _cric_api.get_player_stats(left)
+            right_stats = _cric_api.get_player_stats(right)
+
+            left_role = left_stats.get("role", "").lower() if "error" not in left_stats else ""
+            right_role = right_stats.get("role", "").lower() if "error" not in right_stats else ""
+
+            left_is_bowler = "bowl" in left_role and "bat" not in left_role
+            right_is_bowler = "bowl" in right_role and "bat" not in right_role
+            left_is_batter = "bat" in left_role or "keeper" in left_role
+            right_is_batter = "bat" in right_role or "keeper" in right_role
+
+            if left_is_bowler and right_is_batter:
+                return right, left  # (batter, bowler)
+            elif right_is_bowler and left_is_batter:
+                return left, right  # (batter, bowler)
+            else:
+                # Can't determine roles — return empty, nodes will use positional logic
+                return "", ""
+
+    return "", ""
 
 
 # ---------------------------------------------------------------------------
@@ -43,6 +89,8 @@ _impact_agent            = ImpactAgent()
 async def supervisor_node(state: CricketIQState) -> dict:
     query = state["query"].lower()
     planned = []
+    vs_batter_hint = ""
+    vs_bowler_hint = ""
 
     # Historical query check — do this FIRST
     historical_keywords = [
@@ -52,17 +100,29 @@ async def supervisor_node(state: CricketIQState) -> dict:
     ]
     is_historical = any(word in query for word in historical_keywords)
 
+    # "X vs Y" pattern — use CricAPI roles to assign correctly
+    vs_keywords = [" vs ", " versus ", " v/s "]
+    if any(kw in query for kw in vs_keywords):
+        vs_batter_hint, vs_bowler_hint = await asyncio.to_thread(
+            _identify_vs_roles, query
+        )
+        if "CricketAgent" not in planned:
+            planned.append("CricketAgent")
+        if "BowlerAgent" not in planned:
+            planned.append("BowlerAgent")
+
     # Batter detection — check local data first
     batter_found = False
     for player in PLAYER_STATS:
         parts = player.split()
         if player in query or any(p in query for p in parts if len(p) > 3):
-            planned.append("CricketAgent")
+            if "CricketAgent" not in planned:
+                planned.append("CricketAgent")
             batter_found = True
             break
 
     # Dynamic batter detection
-    if not batter_found:
+    if not batter_found and "CricketAgent" not in planned:
         batter_hint_keywords = [
             "play against", "score against", "bat against", "face",
             "will he score", "will she score", "how will", "can he",
@@ -76,15 +136,16 @@ async def supervisor_node(state: CricketIQState) -> dict:
     for bowler in BOWLER_STATS:
         parts = bowler.split()
         if bowler in query or any(p in query for p in parts if len(p) > 3):
-            planned.append("BowlerAgent")
+            if "BowlerAgent" not in planned:
+                planned.append("BowlerAgent")
             bowler_found = True
             break
 
     # Dynamic bowler detection
-    if not bowler_found:
+    if not bowler_found and "BowlerAgent" not in planned:
         bowler_hint_keywords = [
             "bowl against", "bowling against", "bowler", "wickets",
-            "how will he bowl", "spell", "threat", "versus", "against"
+            "how will he bowl", "spell", "threat", "against"
         ]
         if any(keyword in query for keyword in bowler_hint_keywords):
             planned.append("BowlerAgent")
@@ -142,7 +203,13 @@ async def supervisor_node(state: CricketIQState) -> dict:
             planned.append("LiveMatchAgent")
 
     print(f"\n[Supervisor] Routing to: {planned}")
-    return {"planned_agents": planned}
+
+    result = {"planned_agents": planned}
+    if vs_batter_hint:
+        result["vs_batter_hint"] = vs_batter_hint
+    if vs_bowler_hint:
+        result["vs_bowler_hint"] = vs_bowler_hint
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +217,22 @@ async def supervisor_node(state: CricketIQState) -> dict:
 # ---------------------------------------------------------------------------
 
 async def cricket_node(state: CricketIQState) -> dict:
-    result = await asyncio.to_thread(_cricket_agent.run, state["query"])
+    query = state["query"]
+    query_lower = query.lower()
+    vs_hint = state.get("vs_batter_hint", "")
+
+    if vs_hint:
+        run_query = f"batting analysis for {vs_hint} in: {query}"
+    else:
+        # For vs queries, pass left side explicitly as batter
+        run_query = query
+        for vs_kw in [" vs ", " versus ", " v/s "]:
+            if vs_kw in query_lower:
+                left_side = query_lower.split(vs_kw)[0].strip()
+                run_query = f"batting analysis for {left_side} in: {query}"
+                break
+
+    result = await asyncio.to_thread(_cricket_agent.run, run_query)
     print(f"[CricketAgent] Done.")
     return {"agent_outputs": {"CricketAgent": result}}
 
@@ -158,21 +240,31 @@ async def cricket_node(state: CricketIQState) -> dict:
 async def bowler_node(state: CricketIQState) -> dict:
     query = state["query"]
     query_lower = query.lower()
+    vs_hint = state.get("vs_bowler_hint", "")
 
-    # Check if any local bowlers mentioned
     mentioned_bowlers = [b for b in BOWLER_STATS if b in query_lower]
 
     if mentioned_bowlers:
-        # Run local bowlers
         tasks = [
             asyncio.to_thread(_bowler_agent.run, f"bowling analysis for {bowler} vs batter in: {query}")
             for bowler in mentioned_bowlers
         ]
         outputs = await asyncio.gather(*tasks)
         combined = "\n\n".join(outputs)
+    elif vs_hint:
+        combined = await asyncio.to_thread(
+            _bowler_agent.run,
+            f"bowling analysis for {vs_hint} in: {query}"
+        )
     else:
-        # No local bowler found — pass full query to BowlerAgent for dynamic detection
-        combined = await asyncio.to_thread(_bowler_agent.run, query)
+        # For vs queries, pass right side explicitly as bowler
+        run_query = query
+        for vs_kw in [" vs ", " versus ", " v/s "]:
+            if vs_kw in query_lower:
+                right_side = query_lower.split(vs_kw)[-1].strip()
+                run_query = f"bowling analysis for {right_side} in: {query}"
+                break
+        combined = await asyncio.to_thread(_bowler_agent.run, run_query)
 
     print(f"[BowlerAgent] Done.")
     return {"agent_outputs": {"BowlerAgent": combined}}

@@ -79,7 +79,6 @@ class BowlerAgent(BaseAgent):
 
     def _extract_bowler_name(self, task_lower: str) -> str:
         """Extract bowler name from query."""
-        # Skip words — player names and cricket terms
         batter_words = set()
         for player in PLAYER_STATS.keys():
             for part in player.split():
@@ -99,15 +98,19 @@ class BowlerAgent(BaseAgent):
 
         all_skip = skip_words | batter_words
 
-        words = []
-        for w in task_lower.split():
-            cleaned = w.rstrip(".,!?")
-            if cleaned.endswith("'s"):
-                cleaned = cleaned[:-2]
-            if cleaned and cleaned not in all_skip and len(cleaned) > 3:
-                words.append(cleaned)
+        # Handle "X vs Y" pattern — bowler is after "vs"
+        for vs_kw in [" vs ", " versus ", " v/s "]:
+            if vs_kw in task_lower:
+                after_vs = task_lower.split(vs_kw)[-1].strip()
+                vs_words = []
+                for w in after_vs.split():
+                    cleaned = w.rstrip(".,!?")
+                    if cleaned and cleaned not in all_skip and len(cleaned) > 2:
+                        vs_words.append(cleaned)
+                if vs_words:
+                    return " ".join(vs_words[:2])
 
-        # Bowler usually appears after "against" in the query
+        # Handle "against" pattern
         if "against" in task_lower:
             after_against = task_lower.split("against")[-1].strip()
             against_words = []
@@ -115,14 +118,19 @@ class BowlerAgent(BaseAgent):
                 cleaned = w.rstrip(".,!?")
                 if cleaned.endswith("'s"):
                     cleaned = cleaned[:-2]
-                # Include short words too (like "sam") when extracting bowler name
                 if cleaned and cleaned not in all_skip and len(cleaned) > 2:
                     against_words.append(cleaned)
             if against_words:
                 return " ".join(against_words[:2])
 
-        return " ".join(words[:2])
+        # General extraction
+        words = []
+        for w in task_lower.split():
+            cleaned = w.rstrip(".,!?")
+            if cleaned and cleaned not in all_skip and len(cleaned) > 3:
+                words.append(cleaned)
 
+        return " ".join(words[:2])
 
     def _analyze_with_real_stats(self, bowler_name: str, real_stats: dict) -> str:
         """Generate analysis from real CricAPI bowling stats."""
@@ -231,7 +239,6 @@ ANALYST VERDICT:
                 break
 
         if local_bowler:
-            # Try CricAPI first for richer stats, fall back to local
             real_stats = self._get_real_bowling_stats(local_bowler)
             if real_stats and real_stats.get("bowling_stats"):
                 return self._analyze_with_real_stats(local_bowler, real_stats)
@@ -245,7 +252,7 @@ ANALYST VERDICT:
         if real_stats and real_stats.get("bowling_stats"):
             return self._analyze_with_real_stats(search_term, real_stats)
 
-        return f"BowlerAgent: Could not find bowling data for '{search_term}'. Player may not be in CricAPI database."
+        return f"BowlerAgent: Could not find bowling data for '{search_term}'."
 
     def get_matchup(self, bowler_name: str, batter_name: str) -> dict:
         """Return H2H stats from local data."""
