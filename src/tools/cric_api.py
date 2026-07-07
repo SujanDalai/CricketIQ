@@ -1,6 +1,7 @@
 import requests
 import json
 import time
+from src.logger import logger
 
 # Module-level cache — persists for the lifetime of the process
 _PLAYER_CACHE: dict = {}
@@ -126,8 +127,8 @@ class CricAPI:
             best = None
             for offset in [0, 25, 50]:
                 search_result = self._get("players", params={"offset": offset, "search": player_name})
-                print("\nSEARCHING:", player_name)
-                print(json.dumps(search_result, indent=2)[:3000])
+                logger.debug(f"SEARCHING: {player_name}")
+                logger.debug(json.dumps(search_result, indent=2)[:3000])
                 if "error" in search_result:
                     return search_result
 
@@ -172,16 +173,16 @@ class CricAPI:
         if not player_name_official:
             player_name_official = data.get("name", player_name.title())
 
-        print("=" * 60)
-        print("PLAYER:", player_name_official)
-        print("ROLE:", data.get("role"))
-        print("COUNTRY:", data.get("country"))
-        print("TOTAL STATS:", len(stats))
+        logger.debug("=" * 60)
+        logger.debug(f"PLAYER: {player_name_official}")
+        logger.debug(f"ROLE: {data.get('role')}")
+        logger.debug(f"COUNTRY: {data.get('country')}")
+        logger.debug(f"TOTAL STATS: {len(stats)}")
 
         for s in stats[:20]:
-            print(s)
+            logger.debug(s)
 
-        print("=" * 60)
+        logger.debug("=" * 60)
 
         # Step 3: parse batting stats
         batting_parsed = {}

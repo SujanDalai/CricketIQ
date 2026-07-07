@@ -14,3 +14,4 @@ class Config:
 
     LLM_PROVIDER = os.getenv("LLM_PROVIDER", "Groq")
     LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.1-8b-instant")
+    DEBUG = os.getenv("DEBUG", "False").lower() in ("true", "1", "yes")

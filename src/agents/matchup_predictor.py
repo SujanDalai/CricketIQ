@@ -5,7 +5,7 @@ from src.tools.cric_api import CricAPI
 from src.tools.weather_api import WeatherAPI
 from src.llm.client import invoke_llm
 from src.config import Config
-
+from src.logger import logger
 
 VENUE_TO_CITY = {
     "perth": "Perth,AU",
@@ -29,7 +29,7 @@ VENUE_TO_CITY = {
 class MatchupPredictorAgent(BaseAgent):
     """
     Predicts batter vs bowler matchup outcome using real CricAPI stats
-    and LLM reasoning. Works for any player combination.
+    and a weighted statistical model, explained by an LLM.
     """
 
     def __init__(self):
@@ -165,7 +165,9 @@ class MatchupPredictorAgent(BaseAgent):
         venue: str,
         fmt: str,
         pitch: dict,
-        weather: dict
+        weather: dict,
+        use_venue: bool,
+        use_weather: bool,
     ) -> dict:
         """
         Phase 1: Feature Extraction.
@@ -177,6 +179,9 @@ class MatchupPredictorAgent(BaseAgent):
         # 1. Batter Career stats
         batter_avg = 35.0
         batter_sr = 80.0
+        batter_100s = 0
+        batter_50s = 0
+        batter_matches = 0
         has_real_batter_stats = False
 
         if batter_stats and "error" not in batter_stats:
@@ -192,6 +197,12 @@ class MatchupPredictorAgent(BaseAgent):
                     if "sr" in fd:
                         try: srs.append(float(fd["sr"]))
                         except (ValueError, TypeError): pass
+                    try: batter_100s += int(float(fd.get("100s", 0)))
+                    except (ValueError, TypeError): pass
+                    try: batter_50s += int(float(fd.get("50s", 0)))
+                    except (ValueError, TypeError): pass
+                    try: batter_matches += int(float(fd.get("m", 0)))
+                    except (ValueError, TypeError): pass
                 if avgs:
                     batter_avg = sum(avgs) / len(avgs)
                 if srs:
@@ -202,6 +213,12 @@ class MatchupPredictorAgent(BaseAgent):
                 except (ValueError, TypeError): pass
                 try: batter_sr = float(bd.get("sr", "80"))
                 except (ValueError, TypeError): pass
+                try: batter_100s = int(float(bd.get("100s", 0)))
+                except (ValueError, TypeError): pass
+                try: batter_50s = int(float(bd.get("50s", 0)))
+                except (ValueError, TypeError): pass
+                try: batter_matches = int(float(bd.get("m", 0)))
+                except (ValueError, TypeError): pass
             
             if batter_stats.get("batting_stats"):
                 has_real_batter_stats = True
@@ -210,6 +227,7 @@ class MatchupPredictorAgent(BaseAgent):
         bowler_avg = 27.0
         bowler_econ = 5.5
         bowler_sr = 40.0
+        bowler_wkts = 0
         has_real_bowler_stats = False
 
         if bowler_stats and "error" not in bowler_stats:
@@ -229,6 +247,8 @@ class MatchupPredictorAgent(BaseAgent):
                     if "sr" in fd:
                         try: srs.append(float(fd["sr"]))
                         except (ValueError, TypeError): pass
+                    try: bowler_wkts += int(float(fd.get("wkts", 0)))
+                    except (ValueError, TypeError): pass
                 if avgs:
                     bowler_avg = sum(avgs) / len(avgs)
                 if econs:
@@ -243,26 +263,36 @@ class MatchupPredictorAgent(BaseAgent):
                 except (ValueError, TypeError): pass
                 try: bowler_sr = float(bwd.get("sr", "40"))
                 except (ValueError, TypeError): pass
+                try: bowler_wkts = int(float(bwd.get("wkts", 0)))
+                except (ValueError, TypeError): pass
             
             if bowler_stats.get("bowling_stats"):
                 has_real_bowler_stats = True
 
-        # 3. Environment details
-        pitch_favours = pitch.get("favours", "balanced")
-        pitch_pace = pitch.get("pace", "medium")
-        pitch_bounce = pitch.get("bounce", "medium")
-        pitch_spin = pitch.get("spin", "medium")
-        pitch_swing = pitch.get("swing", "medium")
+        # 3. Environment details (Only use if use_venue / use_weather is True)
+        if use_venue:
+            pitch_favours = pitch.get("favours", "balanced")
+            pitch_pace = pitch.get("pace", "medium")
+            pitch_bounce = pitch.get("bounce", "medium")
+            pitch_spin = pitch.get("spin", "medium")
+            pitch_swing = pitch.get("swing", "medium")
+        else:
+            pitch_favours = "balanced"
+            pitch_pace = "medium"
+            pitch_bounce = "medium"
+            pitch_spin = "medium"
+            pitch_swing = "medium"
 
-        weather_temp = 24.0
-        weather_humidity = 50.0
-        weather_condition = "Clear"
-        if weather:
+        if use_weather and weather:
             try: weather_temp = float(weather.get("temperature_c", "24"))
             except (ValueError, TypeError): pass
             try: weather_humidity = float(weather.get("humidity_pct", "50"))
             except (ValueError, TypeError): pass
             weather_condition = weather.get("condition", "Clear")
+        else:
+            weather_temp = 24.0
+            weather_humidity = 50.0
+            weather_condition = "Clear"
 
         # 4. Recent form extraction
         batter_recent_avg = None
@@ -302,9 +332,13 @@ class MatchupPredictorAgent(BaseAgent):
             "bowler_display_name": bowler_stats.get("name", bowler_name.title()) if bowler_stats else bowler_name.title(),
             "batter_avg": batter_avg,
             "batter_sr": batter_sr,
+            "batter_100s": batter_100s,
+            "batter_50s": batter_50s,
+            "batter_matches": batter_matches,
             "bowler_avg": bowler_avg,
             "bowler_econ": bowler_econ,
             "bowler_sr": bowler_sr,
+            "bowler_wkts": bowler_wkts,
             "pitch_favours": pitch_favours,
             "pitch_pace": pitch_pace,
             "pitch_bounce": pitch_bounce,
@@ -324,6 +358,8 @@ class MatchupPredictorAgent(BaseAgent):
             "is_format_known": bool(fmt and fmt.lower() not in ["overall career", "unknown"]),
             "venue": venue,
             "fmt_key": fmt_key,
+            "use_venue": use_venue,
+            "use_weather": use_weather,
         }
 
     def calculate_scores(self, features: dict) -> dict:
@@ -366,7 +402,7 @@ class MatchupPredictorAgent(BaseAgent):
         # --- Batter capability calculation ---
         batter_score = 50.0
         
-        # 1. Career average adjustment
+        # 1. Career average adjustment (target 35)
         avg_diff = features["batter_avg"] - 35.0
         batter_score += avg_diff * 0.4
         
@@ -374,25 +410,30 @@ class MatchupPredictorAgent(BaseAgent):
         sr_diff = features["batter_sr"] - sr_base
         batter_score += sr_diff * sr_weight
         
-        # 3. Recent form adjustment
+        # 3. Hundreds and fifties adjustment (milestones)
+        if features.get("batter_matches", 0) > 0:
+            ratio = (features["batter_100s"] * 2.0 + features["batter_50s"] * 0.5) / features["batter_matches"]
+            milestone_adj = (ratio - 0.15) * 15.0
+            batter_score += max(-10.0, min(10.0, milestone_adj))
+            
+        # 4. Recent form adjustment
         if features["batter_recent_avg"] is not None:
             form_diff = features["batter_recent_avg"] - features["batter_avg"]
             batter_score += form_diff * 0.3
             
-        # 4. Pitch adjustment for batter
-        if "bat" in features["pitch_favours"].lower():
-            batter_score += 3.0
-            
-        # 5. Bowler style matchings
-        if features["is_paceman"] and features["pitch_pace"] == "low":
-            batter_score += 2.0
-        if features["is_spinner"] and features["pitch_spin"] == "low":
-            batter_score += 2.0
+        # 5. Pitch adjustment (only if use_venue is True)
+        if features.get("use_venue", False):
+            if "bat" in features["pitch_favours"].lower():
+                batter_score += 3.0
+            if features["is_paceman"] and features["pitch_pace"] == "low":
+                batter_score += 2.0
+            if features["is_spinner"] and features["pitch_spin"] == "low":
+                batter_score += 2.0
 
         # --- Bowler capability calculation ---
         bowler_score = 50.0
         
-        # 1. Career average adjustment
+        # 1. Career average adjustment (target 27)
         bowler_avg_diff = 27.0 - features["bowler_avg"]
         bowler_score += bowler_avg_diff * 0.5
         
@@ -404,7 +445,11 @@ class MatchupPredictorAgent(BaseAgent):
         sr_bowler_diff = sr_bowler_base - features["bowler_sr"]
         bowler_score += sr_bowler_diff * sr_bowler_weight
         
-        # 4. Recent form adjustment (wickets and economy)
+        # 4. Wickets volume experience adjustment (target base 100 wkts)
+        wkt_volume_adj = (features["bowler_wkts"] - 100.0) * 0.02
+        bowler_score += max(-5.0, min(5.0, wkt_volume_adj))
+        
+        # 5. Recent form adjustment (wickets and economy)
         if features["bowler_recent_avg_wickets"] is not None:
             wkt_diff = features["bowler_recent_avg_wickets"] - 1.5
             bowler_score += wkt_diff * 4.0
@@ -412,22 +457,20 @@ class MatchupPredictorAgent(BaseAgent):
             econ_form_diff = econ_base - features["bowler_recent_econ"]
             bowler_score += econ_form_diff * econ_weight * 0.3
             
-        # 5. Pitch adjustment for bowler
-        if "bowl" in features["pitch_favours"].lower() or "spin" in features["pitch_favours"].lower() or "pace" in features["pitch_favours"].lower():
-            bowler_score += 3.0
-            
-        # 6. Environmental Pitch adjustments (helps bowler)
-        if features["is_spinner"]:
-            if features["pitch_spin"] == "high":
+        # 6. Pitch adjustment (only if use_venue is True)
+        if features.get("use_venue", False):
+            if "bowl" in features["pitch_favours"].lower() or "spin" in features["pitch_favours"].lower() or "pace" in features["pitch_favours"].lower():
                 bowler_score += 3.0
-        elif features["is_paceman"]:
-            if features["pitch_pace"] == "high" or features["pitch_bounce"] == "high":
-                bowler_score += 2.5
-            if features["pitch_swing"] == "high":
+            if features["is_spinner"] and features["pitch_spin"] == "high":
                 bowler_score += 3.0
-                
-        # 7. Weather adjustments (helps seamer bowler)
-        if features["is_paceman"]:
+            elif features["is_paceman"]:
+                if features["pitch_pace"] == "high" or features["pitch_bounce"] == "high":
+                    bowler_score += 2.5
+                if features["pitch_swing"] == "high":
+                    bowler_score += 3.0
+                    
+        # 7. Weather adjustments (only if use_weather is True and helps seamer bowler)
+        if features.get("use_weather", False) and features["is_paceman"]:
             if features["weather_humidity"] > 75.0:
                 bowler_score += 2.0
             if any(kw in features["weather_condition"].lower() for kw in ["cloud", "rain", "overcast"]):
@@ -441,7 +484,7 @@ class MatchupPredictorAgent(BaseAgent):
     def calculate_probabilities(self, scores: dict, features: dict) -> dict:
         """
         Phase 3: Probability Calculation.
-        Compute final head-to-head probabilities and confidence level from scores.
+        Compute final head-to-head probabilities, confidence level, and statistical edge from scores.
         """
         diff = scores["batter_score"] - scores["bowler_score"]
         
@@ -459,20 +502,26 @@ class MatchupPredictorAgent(BaseAgent):
         is_venue_known = features["is_venue_known"]
         is_format_known = features["is_format_known"]
 
-        if has_batter and has_bowler:
-            if is_venue_known and is_format_known:
-                confidence = "High"
-            else:
-                confidence = "Medium"
-        elif has_batter or has_bowler:
-            confidence = "Low"
+        if has_batter and has_bowler and is_format_known and is_venue_known:
+            confidence = "High"
+        elif has_batter and has_bowler and is_format_known:
+            confidence = "Medium"
         else:
-            confidence = "Very Low"
+            confidence = "Low"
+
+        # Determine statistical edge in Python
+        if batting_prob > dismissal_prob:
+            edge = features["batter_display_name"]
+        elif dismissal_prob > batting_prob:
+            edge = features["bowler_display_name"]
+        else:
+            edge = "Evenly Matched"
 
         return {
             "batting_dominance_probability": batting_prob,
             "dismissal_probability": dismissal_prob,
-            "confidence": confidence
+            "confidence": confidence,
+            "edge": edge
         }
 
     def generate_explanation(self, probs: dict, features: dict, format: str) -> str:
@@ -483,40 +532,43 @@ class MatchupPredictorAgent(BaseAgent):
         batter_recent_info = f", Recent form avg={features['batter_recent_avg']:.1f}" if features['batter_recent_avg'] is not None else ""
         batter_info = (
             f"{features['batter_display_name']} — "
-            f"Career Avg={features['batter_avg']:.1f}, SR={features['batter_sr']:.1f}{batter_recent_info}"
+            f"Career Avg={features['batter_avg']:.1f}, SR={features['batter_sr']:.1f}, "
+            f"100s={features['batter_100s']}, 50s={features['batter_50s']}, Matches={features['batter_matches']}{batter_recent_info}"
         )
 
         bowler_recent_info = f", Recent form econ={features['bowler_recent_econ']:.1f}" if features['bowler_recent_econ'] is not None else ""
         bowler_info = (
             f"{features['bowler_display_name']} — "
-            f"Career Avg={features['bowler_avg']:.1f}, Econ={features['bowler_econ']:.1f}, SR={features['bowler_sr']:.1f}{bowler_recent_info}"
+            f"Career Avg={features['bowler_avg']:.1f}, Econ={features['bowler_econ']:.1f}, SR={features['bowler_sr']:.1f}, "
+            f"Wickets={features['bowler_wkts']}{bowler_recent_info}"
         )
 
         prompt = f"""
 BATTER: {batter_info}
 BOWLER: {bowler_info}
 
-VENUE: {features['venue'].title() if features['venue'] else 'Unknown'}
+VENUE: {features['venue'].title() if features['use_venue'] else 'Unknown'}
 PITCH: favours={features['pitch_favours']}, pace={features['pitch_pace']}, bounce={features['pitch_bounce']}, spin={features['pitch_spin']}, swing={features['pitch_swing']}
 FORMAT: {format}
 WEATHER: Temp={features['weather_temp']}°C, Humidity={features['weather_humidity']}%, Condition={features['weather_condition']}
 
-COMPUTED PROBABILITIES (DO NOT OVERWRITE OR ESTIMATE ANY DIFFERENT NUMBERS):
-Dismissal probability: {probs['dismissal_probability']}%
-Batting dominance: {probs['batting_dominance_probability']}%
+COMPUTED STATISTICS (DO NOT CONTRADICT OR ESTIMATE ANY DIFFERENT NUMBERS):
+Batting Dominance Probability: {probs['batting_dominance_probability']}%
+Dismissal Chance Probability: {probs['dismissal_probability']}%
+Statistical Edge: {probs['edge']}
 Confidence Level: {probs['confidence']}
 """
 
         return invoke_llm(
             system_prompt=(
                 "You are a senior cricket analytics expert specializing strictly in player head-to-head matchups.\n"
-                "Given the batter and bowler stats and the pre-calculated probabilities, provide a sharp matchup explanation in 3-5 sentences.\n"
-                "IMPORTANT: You must use the supplied dismissal probability and batting dominance percentages exactly in your text. Do NOT invent, generate, or estimate any new/different percentages or probabilities. Your role is strictly to explain the analytical reasoning behind these pre-computed numbers based on the player profile, form, pitch, and weather features provided.\n"
+                "Given the batter and bowler stats, computed probabilities, and statistical edge, provide a sharp matchup explanation in 2-4 sentences.\n"
+                "IMPORTANT: You must use the supplied dismissal probability, batting dominance percentages, and statistical edge exactly in your text. Do NOT invent, generate, or estimate any new/different percentages or probabilities. Your role is strictly to explain the analytical reasoning behind these pre-computed numbers based on the player profile, form, pitch, and weather features provided.\n"
                 "RULES:\n"
-                "1. ONLY discuss: the batter vs bowler matchup, who has the edge and why, which skills matter, and whether the batter is likely to dominate or get dismissed.\n"
+                "1. ONLY discuss: the batter vs bowler matchup, why the statistical edge lies where it does, and the key contributing stats.\n"
                 "2. DO NOT predict match scores, runs scored, number of wickets, team totals, or the match winner.\n"
-                "3. If no venue is provided (venue is Unknown), you must explicitly state that venue-specific effects were not included because no venue was provided.\n"
-                "4. Be specific with the numbers provided. No bullet points."
+                "3. If venue is Unknown, explain the matchup based purely on the player profiles and stats.\n"
+                "4. Be extremely concise (2-4 sentences max). No bullet points."
             ),
             user_prompt=prompt,
         )
@@ -530,12 +582,12 @@ Confidence Level: {probs['confidence']}
         bowler_stats: dict | None = None,
         venue: str | None = None,
         format: str | None = None,
+        use_weather: bool = False,
     ) -> str:
         task_lower = task.lower()
 
         if not batter_name or not bowler_name:
-            print(f"[MatchupPredictor] Batter = {batter_name}")
-            print(f"[MatchupPredictor] Bowler = {bowler_name}")
+            logger.debug(f"[MatchupPredictor] Batter = {batter_name} | Bowler = {bowler_name}")
             extracted_batter, extracted_bowler = self._extract_names(task_lower)
 
             if not batter_name:
@@ -570,15 +622,19 @@ Confidence Level: {probs['confidence']}
         fmt_map = {"test": "test", "odi": "odi", "t20i": "t20i", "overall career": "overall"}
         fmt_key = fmt_map.get(fmt.lower(), "overall")
 
+        use_venue = venue.lower() != "unknown"
+
         # Get weather and pitch details
-        if venue.lower() == "unknown":
+        if not use_venue:
             weather = {}
             pitch = {}
         else:
             city = VENUE_TO_CITY.get(venue, venue)
-            weather = self.weather_api.get_weather(city)
-            if "error" in weather or not weather:
-                weather = self._get_weather_fallback(venue)
+            weather = {}
+            if use_weather:
+                weather = self.weather_api.get_weather(city)
+                if "error" in weather or not weather:
+                    weather = self._get_weather_fallback(venue)
             
             pitch = PITCH_CONDITIONS.get(venue.lower(), {
                 "pace": "medium", "bounce": "medium",
@@ -595,8 +651,7 @@ Confidence Level: {probs['confidence']}
         else:
             if batter_name:
                 batter_result = self.cric_api.get_player_stats(batter_name)
-                print("BATTER RESULT")
-                print(json.dumps(batter_result, indent=2))
+                logger.debug(f"[MatchupPredictor] Batter result resolved from CricAPI")
                 if "error" not in batter_result:
                     batter_stats = batter_result
                 else:
@@ -610,8 +665,7 @@ Confidence Level: {probs['confidence']}
         else:
             if bowler_name:
                 bowler_result = self.cric_api.get_player_stats(bowler_name)
-                print("BOWLER RESULT")
-                print(json.dumps(bowler_result, indent=2))
+                logger.debug(f"[MatchupPredictor] Bowler result resolved from CricAPI")
                 if "error" not in bowler_result:
                     bowler_stats = bowler_result
                 else:
@@ -626,7 +680,9 @@ Confidence Level: {probs['confidence']}
             venue=venue,
             fmt=fmt,
             pitch=pitch,
-            weather=weather
+            weather=weather,
+            use_venue=use_venue,
+            use_weather=use_weather
         )
 
         # Calculate capability scores using Phase 2
@@ -656,7 +712,8 @@ Confidence Level: {probs['confidence']}
             "dismissal_probability": dismissal_prob,
             "batting_dominance_probability": batting_prob,
             "confidence": confidence,
-            "data_source": "CricAPI real stats + weighted statistical model",
+            "statistical_edge": probs["edge"],
+            "data_source": "CricAPI real statistics + weighted statistical model + LLM explanation",
             "verdict": verdict,
         }
 
@@ -671,7 +728,7 @@ Confidence Level: {probs['confidence']}
         else:
             bowler_factor = f"Bowler strength: {bowler_display_name} statistics not available."
 
-        if venue.lower() == "unknown":
+        if not use_venue:
             pitch_factor = "Pitch: Venue-specific effects were not included because no venue was provided."
             weather_factor = "Weather: Weather-specific effects were not included because no venue was provided."
         else:
@@ -683,7 +740,9 @@ Confidence Level: {probs['confidence']}
         else:
             recent_form_factor = f"Recent form: Evaluated using career baseline statistics for {fmt} matchups."
 
-        return f"""PLAYER MATCHUP PREDICTION
+        return f"""-----------------------------------
+PLAYER MATCHUP PREDICTION
+-----------------------------------
 
 Batter: {batter_display_name}
 Bowler: {bowler_display_name}
@@ -700,7 +759,6 @@ Confidence
 {confidence}
 
 Key Factors
-
 • {batter_factor}
 • {bowler_factor}
 • {pitch_factor}
@@ -708,11 +766,9 @@ Key Factors
 • {recent_form_factor}
 
 Expert Verdict
-
 {verdict}
 
 JSON
-
 ```json
 {json.dumps(output_dict, indent=2)}
 ```

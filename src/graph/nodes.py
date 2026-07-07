@@ -16,6 +16,7 @@ from src.graph.state import CricketIQState
 from src.tools.cricket_data import PLAYER_STATS, BOWLER_STATS, PITCH_CONDITIONS
 from src.tools.cric_api import CricAPI
 from src.config import Config
+from src.logger import logger
 
 from src.agents.cricket import CricketAgent
 from src.agents.bowler import BowlerAgent
@@ -92,7 +93,7 @@ async def supervisor_node(state: CricketIQState) -> dict:
     intent = parsed.get("intent", "general")
     is_live = parsed.get("is_live", False)
 
-    print(f"[Supervisor] Intent: {intent} | Batter: {batter} | Bowler: {bowler} | Venue: {venue}")
+    logger.debug(f"[Supervisor] Intent: {intent} | Batter: {batter} | Bowler: {bowler} | Venue: {venue}")
 
     planned = []
     vs_batter_hint = batter or ""
@@ -126,7 +127,7 @@ async def supervisor_node(state: CricketIQState) -> dict:
 
     planned = list(dict.fromkeys(planned))
 
-    print(f"[Supervisor] Routing to: {planned}")
+    logger.debug(f"[Supervisor] Routing to: {planned}")
 
     result = {
         "planned_agents": planned,
@@ -143,7 +144,7 @@ async def supervisor_node(state: CricketIQState) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# SPECIALIST AGENT NODES
+# SPECIALIST AGENT NODES (STAGE 1)
 # ---------------------------------------------------------------------------
 
 async def cricket_node(state: CricketIQState) -> dict:
@@ -151,7 +152,7 @@ async def cricket_node(state: CricketIQState) -> dict:
     query_lower = query.lower()
     vs_hint = state.get("vs_batter_hint", "")
     batter_stats = state.get("batter_stats")
-    print(f"[CricketNode] vs_batter_hint from state: '{vs_hint}'")
+    logger.debug(f"[CricketNode] vs_batter_hint from state: '{vs_hint}'")
 
     # Resolve batter name if missing
     if not vs_hint:
@@ -180,7 +181,7 @@ async def cricket_node(state: CricketIQState) -> dict:
         player_name=vs_hint,
         batter_stats=batter_stats
     )
-    print(f"[CricketAgent] Done.")
+    logger.debug(f"[CricketAgent] Done.")
     return {
         "agent_outputs": {"CricketAgent": result},
         "batter_stats": batter_stats
@@ -192,7 +193,7 @@ async def bowler_node(state: CricketIQState) -> dict:
     query_lower = query.lower()
     vs_hint = state.get("vs_bowler_hint", "")
     bowler_stats = state.get("bowler_stats")
-    print(f"[BowlerNode] vs_bowler_hint from state: '{vs_hint}'")
+    logger.debug(f"[BowlerNode] vs_bowler_hint from state: '{vs_hint}'")
 
     mentioned_bowlers = [b for b in BOWLER_STATS if b in query_lower]
 
@@ -219,7 +220,7 @@ async def bowler_node(state: CricketIQState) -> dict:
             )
         outputs = await asyncio.gather(*tasks)
         combined = "\n\n".join(outputs)
-        print(f"[BowlerAgent] Done.")
+        logger.debug(f"[BowlerAgent] Done.")
         return {
             "agent_outputs": {"BowlerAgent": combined},
             "bowler_stats": bowler_stats
@@ -246,7 +247,7 @@ async def bowler_node(state: CricketIQState) -> dict:
             bowler_name=vs_hint,
             bowler_stats=bowler_stats
         )
-        print(f"[BowlerAgent] Done.")
+        logger.debug(f"[BowlerAgent] Done.")
         return {
             "agent_outputs": {"BowlerAgent": combined},
             "bowler_stats": bowler_stats
@@ -276,7 +277,7 @@ async def matchup_node(state: CricketIQState) -> dict:
         batter_stats=batter_stats,
         bowler_stats=bowler_stats
     )
-    print(f"[MatchupAgent] Done.")
+    logger.debug(f"[MatchupAgent] Done.")
     return {
         "agent_outputs": {"MatchupAgent": result}
     }
@@ -301,6 +302,10 @@ async def matchup_predictor_node(state: CricketIQState) -> dict:
         if not bowler:
             bowler = ext_bowler
 
+    # Determine whether weather details should be used (if WeatherAgent is planned or query mentions weather conditions)
+    planned = state.get("planned_agents", [])
+    use_weather = "WeatherAgent" in planned or any(w in query_lower for w in ["weather", "temp", "humidity", "rain", "forecast", "condition", "today"])
+
     result = await asyncio.to_thread(
         _matchup_predictor_agent.run,
         task=query,
@@ -309,9 +314,10 @@ async def matchup_predictor_node(state: CricketIQState) -> dict:
         batter_stats=batter_stats,
         bowler_stats=bowler_stats,
         venue=venue,
-        format=fmt
+        format=fmt,
+        use_weather=use_weather
     )
-    print(f"[MatchupPredictorAgent] Done.")
+    logger.debug(f"[MatchupPredictorAgent] Done.")
     return {
         "agent_outputs": {"MatchupPredictorAgent": result}
     }
@@ -322,31 +328,31 @@ async def stage_1_join_node(state: CricketIQState) -> dict:
     Pass-through join node representing the completion of Stage 1 processing.
     Ensures all Stage 1 parallel branches have completed before routing to Stage 2.
     """
-    print("[Stage 1 Join] Stage 1 complete.")
+    logger.debug("[Stage 1 Join] Stage 1 complete.")
     return {}
 
 
 async def weather_node(state: CricketIQState) -> dict:
     result = await asyncio.to_thread(_weather_agent.run, state["query"])
-    print(f"[WeatherAgent] Done.")
+    logger.debug(f"[WeatherAgent] Done.")
     return {"agent_outputs": {"WeatherAgent": result}}
 
 
 async def pitch_node(state: CricketIQState) -> dict:
     result = await asyncio.to_thread(_pitch_agent.run, state["query"])
-    print(f"[PitchAgent] Done.")
+    logger.debug(f"[PitchAgent] Done.")
     return {"agent_outputs": {"PitchAgent": result}}
 
 
 async def live_match_node(state: CricketIQState) -> dict:
     result = await asyncio.to_thread(_live_match_agent.run, state["query"])
-    print(f"[LiveMatchAgent] Done.")
+    logger.debug(f"[LiveMatchAgent] Done.")
     return {"agent_outputs": {"LiveMatchAgent": result}}
 
 
 async def impact_node(state: CricketIQState) -> dict:
     result = await asyncio.to_thread(_impact_agent.run, state["query"])
-    print(f"[ImpactAgent] Done.")
+    logger.debug(f"[ImpactAgent] Done.")
     return {"agent_outputs": {"ImpactAgent": result}}
 
 
@@ -355,57 +361,36 @@ async def impact_node(state: CricketIQState) -> dict:
 # ---------------------------------------------------------------------------
 
 async def aggregator_node(state: CricketIQState) -> dict:
-    agent_outputs = state.get("agent_outputs", {})
     query = state["query"]
+    agent_outputs = state["agent_outputs"]
 
-    if not agent_outputs:
-        return {"final_report": "No agent outputs available to aggregate."}
+    combined = ""
+    active_agents = []
+    for agent_name, output in agent_outputs.items():
+        if output:
+            combined += f"=== {agent_name} Output ===\n{output}\n\n"
+            active_agents.append(agent_name)
 
-    combined = "\n\n".join(
-        f"--- {agent} Output ---\n{output}"
-        for agent, output in agent_outputs.items()
-    )
+    if not combined:
+        return {"final_report": "No agent outputs were generated. Cannot formulate final report."}
 
-    active_agents = list(agent_outputs.keys())
-    sections = []
-
-    if "CricketAgent" in active_agents:
-        sections.append(f"{len(sections)+1}) Overall verdict on the batter's current form.")
-    if "BowlerAgent" in active_agents:
-        sections.append(f"{len(sections)+1}) Which bowler poses the biggest threat and why.")
-    if "MatchupAgent" in active_agents:
-        sections.append(f"{len(sections)+1}) The key matchup to watch.")
-    if "MatchupPredictorAgent" in active_agents:
-        sections.append(f"{len(sections)+1}) Dismissal and batting dominance probabilities.")
-    if "PitchAgent" in active_agents:
-        sections.append(f"{len(sections)+1}) How the pitch surface affects the contest.")
-    if "WeatherAgent" in active_agents:
-        sections.append(f"{len(sections)+1}) How weather conditions affect the match.")
-    if "LiveMatchAgent" in active_agents:
-        sections.append(f"{len(sections)+1}) Current live match or schedule context.")
-    if "ImpactAgent" in active_agents:
-        sections.append(f"{len(sections)+1}) Match turning point and key momentum shifts.")
-
-    sections_text = "\n".join(sections)
-
+    # Clean structured Aggregator summary focusing strictly on summarizing specialist data.
     final = await asyncio.to_thread(
         invoke_llm,
         system_prompt=(
-            "You are the final aggregator for CricketIQ. "
-            "You receive outputs from specialist cricket analysis agents. "
-            "IMPORTANT: Only use data provided by the agents. Never invent statistics, "
-            "scores, or predictions not present in the agent outputs. "
-            "If the agent data does not match the user's question (e.g. wrong match, wrong year), "
-            "explicitly say so and do NOT provide information from your own knowledge. "
-            "If data is insufficient, say so clearly and stop there. "
-            f"Write a clear, confident final report in 6-8 sentences covering:\n"
-            f"{sections_text}\n"
-            "Sound like a senior analyst presenting to a team selection committee. "
-            "Be specific with numbers from the data."
+            "You are the final aggregator for CricketIQ.\n"
+            "Your task is to summarize the specialist cricket analysis agents' outputs.\n"
+            "IMPORTANT: Do NOT regenerate predictions or repeat/invent any matchup probabilities, percentages, or final verdicts.\n"
+            "You must write a clean, structured summary with the following sections (only include sections that have agent outputs):\n"
+            "1. Batter Analysis: Summarize batter form/stats from CricketAgent.\n"
+            "2. Bowler Analysis: Summarize bowler threat/stats from BowlerAgent.\n"
+            "3. Matchup Prediction: High-level qualitative summary of matchup findings (DO NOT repeat the computed probabilities or the verdict text).\n"
+            "4. Key Takeaway: The single most important tactical takeaway from the contest.\n\n"
+            "Format the output clearly with numbered section headings. Sound like a senior analyst presenting to a team selection committee."
         ),
         user_prompt=f"User question: {query}\n\nAgent outputs:\n{combined}",
     )
-    print(f"[Aggregator] Report generated.")
+    logger.debug(f"[Aggregator] Report generated.")
 
     separator = "=" * 60
     predictor_output = agent_outputs.get("MatchupPredictorAgent", "")

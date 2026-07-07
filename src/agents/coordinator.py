@@ -1,6 +1,7 @@
 import json
 import ollama
 from src.config import Config
+from src.logger import logger
 from src.agents.base import BaseAgent
 from src.agents.cricket import CricketAgent
 from src.agents.bowler import BowlerAgent
@@ -128,27 +129,27 @@ class CoordinatorAgent(BaseAgent):
         return response["message"]["content"]
 
     def run(self, task: str) -> str:
-        print(f"\n[Coordinator] Received query: {task}")
+        logger.debug(f"[Coordinator] Received query: {task}")
 
         # Step 1: Plan tasks
-        print("[Coordinator] Planning subtasks...")
+        logger.debug("[Coordinator] Planning subtasks...")
         subtasks = self._plan_tasks(task)
-        print(f"[Coordinator] Subtasks planned: {len(subtasks)}")
+        logger.debug(f"[Coordinator] Subtasks planned: {len(subtasks)}")
         for t in subtasks:
-            print(f"  → [{t.get('agent')}] {t.get('task')}")
+            logger.debug(f"  → [{t.get('agent')}] {t.get('task')}")
 
         # Step 2: Run each agent
         agent_outputs = []
         for subtask in subtasks:
             agent_name = subtask.get("agent", "CricketAgent")
             agent_task = subtask.get("task", task)
-            print(f"\n[{agent_name}] Running: {agent_task}")
+            logger.debug(f"[{agent_name}] Running: {agent_task}")
             result = self._run_task(agent_name, agent_task)
-            print(result)
+            logger.debug(result)
             agent_outputs.append({"agent": agent_name, "result": result})
 
         # Step 3: Aggregate
-        print("\n[Coordinator] Aggregating final report...")
+        logger.debug("[Coordinator] Aggregating final report...")
         final_report = self._aggregate(task, agent_outputs)
 
         return f"""

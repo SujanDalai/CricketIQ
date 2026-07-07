@@ -3,6 +3,7 @@ from src.tools.cricket_data import PLAYER_STATS, BOWLER_STATS
 from src.tools.cric_api import CricAPI
 from src.llm.client import invoke_llm
 from src.config import Config
+from src.logger import logger
 
 
 class CricketAgent(BaseAgent):
@@ -193,7 +194,7 @@ class CricketAgent(BaseAgent):
                 real_stats = self._get_real_stats(player_name)
             else:
                 search_term = self._extract_player_name(task_lower)
-                print(f"[CricketAgent] Searching CricAPI for: '{search_term}'")
+                logger.debug(f"[CricketAgent] Searching CricAPI for: '{search_term}'")
                 real_stats = self._get_real_stats(search_term) if search_term else None
 
             if real_stats:

@@ -3,6 +3,7 @@ from src.tools.cricket_data import BOWLER_STATS, PLAYER_STATS
 from src.tools.cric_api import CricAPI
 from src.llm.client import invoke_llm
 from src.config import Config
+from src.logger import logger
 
 
 class BowlerAgent(BaseAgent):
@@ -233,8 +234,8 @@ ANALYST VERDICT:
         bowler_name: str | None = None,
         bowler_stats: dict | None = None
     ):
-        print("TASK =", task)
-        print("BOWLER_NAME =", bowler_name)
+        logger.debug(f"TASK = {task}")
+        logger.debug(f"BOWLER_NAME = {bowler_name}")
         task_lower = task.lower()
 
         if bowler_stats is not None:
@@ -273,7 +274,7 @@ ANALYST VERDICT:
             search_term = bowler_name
         else:
             search_term = self._extract_bowler_name(task_lower)
-        print(f"[BowlerAgent] Searching CricAPI for: '{search_term}'")
+        logger.debug(f"[BowlerAgent] Searching CricAPI for: '{search_term}'")
         real_stats = self._get_real_bowling_stats(search_term) if search_term else None
 
         if real_stats and real_stats.get("bowling_stats"):

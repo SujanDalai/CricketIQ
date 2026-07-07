@@ -2,6 +2,7 @@ from src.agents.base import BaseAgent
 from src.tools.cric_api import CricAPI
 from src.llm.client import invoke_llm
 from src.config import Config
+from src.logger import logger
 
 
 class ImpactAgent(BaseAgent):
@@ -161,7 +162,7 @@ class ImpactAgent(BaseAgent):
         if not match_id:
             return "ImpactAgent: Could not find a recent match matching your query."
 
-        print(f"[ImpactAgent] Analyzing: {match_found_name}")
+        logger.debug(f"[ImpactAgent] Analyzing: {match_found_name}")
 
         # Step 2: fetch scorecard
         scorecard_data = self._fetch_scorecard(match_id)

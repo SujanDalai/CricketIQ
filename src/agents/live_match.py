@@ -3,6 +3,7 @@ from src.tools.cric_api import CricAPI
 from src.tools.cricbuzz import CricbuzzScraper
 from src.llm.client import invoke_llm
 from src.config import Config
+from src.logger import logger
 
 
 class LiveMatchAgent(BaseAgent):
@@ -36,7 +37,7 @@ class LiveMatchAgent(BaseAgent):
 
         if has_error:
             cricbuzz_error = data[0]["error"]
-            print(f"[LiveMatchAgent] Cricbuzz failed ({cricbuzz_error}), falling back to CricAPI...")
+            logger.debug(f"[LiveMatchAgent] Cricbuzz failed ({cricbuzz_error}), falling back to CricAPI...")
             if is_live:
                 data = self.cric_api.get_live_scores()
             else:
