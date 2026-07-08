@@ -3,6 +3,7 @@ import base64
 import os
 import sys
 import re
+from src.logger import logger
 
 # 1. System routing: Add 'src' directory to python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
@@ -248,3 +249,222 @@ if st.session_state.current_report:
             
             # Print the text raw to prevent grammar cutoffs or format corruption
             st.markdown(st.session_state.current_report)   
+
+
+# ====================================================================
+# 🏏 HISTORICAL MATCHES SECTION
+# ====================================================================
+show_historical = False
+if user_query:
+    query_lower = user_query.lower()
+    historical_keywords = ["historical", "scorecard", "completed match", "final", "world cup", "ipl"]
+    if any(keyword in query_lower for keyword in historical_keywords):
+        show_historical = True
+
+if show_historical:
+    st.markdown("---")
+    st.markdown("<h2 style='color: white; margin-top: 20px;'>🏏 Historical Matches</h2>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #888A93; margin-bottom: 20px;'>View details and ball-by-ball performance scorecards of iconic completed matches.</p>", unsafe_allow_html=True)
+
+    try:
+        from src.services.historical_matches import HistoricalMatchService
+        
+        # Initialize service
+        hist_service = HistoricalMatchService()
+        
+        # Get available tournaments
+        tournaments = hist_service.get_tournaments()
+        
+        if not tournaments:
+            st.info("No historical tournament data available at this time.")
+        else:
+            # Layout for Dropdowns
+            col_t, col_m = st.columns(2)
+            
+            with col_t:
+                selected_tournament = st.selectbox(
+                    "Select Tournament:",
+                    options=tournaments,
+                    key="hist_tournament_select"
+                )
+                
+            # Get matches for the selected tournament
+            matches = hist_service.get_matches_for_tournament(selected_tournament)
+            match_options = {m["title"]: m["id"] for m in matches} if matches else {}
+            
+            with col_m:
+                selected_match_title = st.selectbox(
+                    "Select Match:",
+                    options=list(match_options.keys()),
+                    key="hist_match_select"
+                )
+                
+            if selected_match_title:
+                match_id = match_options[selected_match_title]
+                scorecard = hist_service.get_match_scorecard(match_id)
+                
+                if not scorecard:
+                    st.warning("Scorecard details not found for the selected match.")
+                else:
+                    # Custom Styling CSS for scorecard
+                    st.markdown("""
+                        <style>
+                        .match-meta-card {
+                            background-color: rgba(255, 255, 255, 0.03);
+                            border: 1px solid rgba(255, 255, 255, 0.08);
+                            border-radius: 8px;
+                            padding: 20px;
+                            margin-top: 15px;
+                            margin-bottom: 25px;
+                        }
+                        .meta-header {
+                            font-size: 1.4rem;
+                            font-weight: 700;
+                            color: #ffffff;
+                            margin-bottom: 12px;
+                        }
+                        .meta-item {
+                            font-size: 0.95rem;
+                            color: #e0e0e0;
+                            margin-bottom: 6px;
+                        }
+                        .meta-label {
+                            color: #888A93;
+                            font-weight: 500;
+                        }
+                        .scorecard-table {
+                            width: 100%;
+                            border-collapse: collapse;
+                            margin-top: 10px;
+                            margin-bottom: 20px;
+                            background-color: rgba(255, 255, 255, 0.01);
+                            border: 1px solid rgba(255, 255, 255, 0.08);
+                            border-radius: 6px;
+                            overflow: hidden;
+                        }
+                        .scorecard-table th {
+                            background-color: rgba(255, 255, 255, 0.05);
+                            color: #ff4b4b;
+                            text-align: left;
+                            padding: 8px 12px;
+                            font-weight: 600;
+                            font-size: 0.9rem;
+                            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                        }
+                        .scorecard-table td {
+                            padding: 8px 12px;
+                            color: #e0e0e0;
+                            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+                            font-size: 0.85rem;
+                        }
+                        .scorecard-table tr:hover {
+                            background-color: rgba(255, 255, 255, 0.03);
+                        }
+                        .result-badge {
+                            background-color: rgba(0, 200, 83, 0.1);
+                            border: 1px solid rgba(0, 200, 83, 0.25);
+                            color: #b9f6ca;
+                            padding: 6px 12px;
+                            border-radius: 4px;
+                            display: inline-block;
+                            font-weight: 600;
+                            margin-top: 10px;
+                        }
+                        </style>
+                    """, unsafe_allow_html=True)
+                    
+                    # Render metadata card
+                    st.markdown(f"""
+                        <div class="match-meta-card">
+                            <div class="meta-header">{scorecard['match_title']}</div>
+                            <div class="meta-item"><span class="meta-label">Tournament:</span> {scorecard['tournament']}</div>
+                            <div class="meta-item"><span class="meta-label">Venue:</span> {scorecard['venue']}</div>
+                            <div class="meta-item"><span class="meta-label">Date:</span> {scorecard['date']}</div>
+                            <div class="meta-item"><span class="meta-label">Toss:</span> {scorecard['toss']}</div>
+                            <div class="meta-item"><span class="meta-label">Player of the Match:</span> 🌟 {scorecard['player_of_the_match']}</div>
+                            <div class="result-badge">🏆 {scorecard['result']}</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Team scores summary
+                    st.markdown("### 📊 Team Scores")
+                    scores_cols = st.columns(len(scorecard['team_scores']))
+                    for idx, (team, score) in enumerate(scorecard['team_scores'].items()):
+                        with scores_cols[idx]:
+                            st.metric(label=team, value=score)
+                    
+                    # Detailed Scorecard Tabs
+                    tab_batting, tab_bowling = st.tabs(["🏏 Batting Scorecard", "🥎 Bowling Figures"])
+                    
+                    with tab_batting:
+                        for team, batting_rows in scorecard['batting_scorecard'].items():
+                            st.markdown(f"#### {team} Innings")
+                            
+                            # Build HTML table for batting
+                            table_html = """
+                            <table class="scorecard-table">
+                                <thead>
+                                    <tr>
+                                        <th>Batter</th>
+                                        <th>Dismissal</th>
+                                        <th style='text-align: right;'>Runs</th>
+                                        <th style='text-align: right;'>Balls</th>
+                                        <th style='text-align: right;'>4s</th>
+                                        <th style='text-align: right;'>6s</th>
+                                        <th style='text-align: right;'>SR</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                            """
+                            for row in batting_rows:
+                                table_html += f"""
+                                    <tr>
+                                        <td><b>{row['player']}</b></td>
+                                        <td style='color: #888A93;'>{row['status']}</td>
+                                        <td style='text-align: right;'>{row['runs']}</td>
+                                        <td style='text-align: right;'>{row['balls']}</td>
+                                        <td style='text-align: right;'>{row['fours']}</td>
+                                        <td style='text-align: right;'>{row['sixes']}</td>
+                                        <td style='text-align: right;'>{row['sr']:.1f}</td>
+                                    </tr>
+                                """
+                            table_html += "</tbody></table>"
+                            st.html(table_html)
+                    
+                    with tab_bowling:
+                        for team, bowling_rows in scorecard['bowling_figures'].items():
+                            st.markdown(f"#### {team} Bowling")
+                            
+                            # Build HTML table for bowling
+                            table_html = """
+                            <table class="scorecard-table">
+                                <thead>
+                                    <tr>
+                                        <th>Bowler</th>
+                                        <th style='text-align: right;'>Overs</th>
+                                        <th style='text-align: right;'>Maidens</th>
+                                        <th style='text-align: right;'>Runs</th>
+                                        <th style='text-align: right;'>Wickets</th>
+                                        <th style='text-align: right;'>Econ</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                            """
+                            for row in bowling_rows:
+                                table_html += f"""
+                                    <tr>
+                                        <td><b>{row['player']}</b></td>
+                                        <td style='text-align: right;'>{row['overs']:.1f}</td>
+                                        <td style='text-align: right;'>{row['maidens']}</td>
+                                        <td style='text-align: right;'>{row['runs']}</td>
+                                        <td style='text-align: right;'>{row['wickets']}</td>
+                                        <td style='text-align: right;'>{row['econ']:.2f}</td>
+                                    </tr>
+                                """
+                            table_html += "</tbody></table>"
+                            st.html(table_html)
+                            
+    except Exception as ui_ex:
+        logger.error(f"Error rendering Historical Matches UI: {ui_ex}")
+        st.error("Could not load Historical Matches component.")
+
