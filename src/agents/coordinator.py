@@ -1,7 +1,9 @@
 import json
 import ollama
+import asyncio
 from src.config import Config
 from src.logger import logger
+from src.graph.workflow import cricketiq_graph
 from src.agents.base import BaseAgent
 from src.agents.cricket import CricketAgent
 from src.agents.bowler import BowlerAgent
@@ -129,35 +131,19 @@ class CoordinatorAgent(BaseAgent):
         return response["message"]["content"]
 
     def run(self, task: str) -> str:
-        logger.debug(f"[Coordinator] Received query: {task}")
-
-        # Step 1: Plan tasks
-        logger.debug("[Coordinator] Planning subtasks...")
-        subtasks = self._plan_tasks(task)
-        logger.debug(f"[Coordinator] Subtasks planned: {len(subtasks)}")
-        for t in subtasks:
-            logger.debug(f"  → [{t.get('agent')}] {t.get('task')}")
-
-        # Step 2: Run each agent
-        agent_outputs = []
-        for subtask in subtasks:
-            agent_name = subtask.get("agent", "CricketAgent")
-            agent_task = subtask.get("task", task)
-            logger.debug(f"[{agent_name}] Running: {agent_task}")
-            result = self._run_task(agent_name, agent_task)
-            logger.debug(result)
-            agent_outputs.append({"agent": agent_name, "result": result})
-
-        # Step 3: Aggregate
-        logger.debug("[Coordinator] Aggregating final report...")
-        final_report = self._aggregate(task, agent_outputs)
-
-        return f"""
-{'='*60}
-  CRICKETIQ FINAL REPORT
-{'='*60}
-
-{final_report}
-
-{'='*60}
-"""
+        logger.debug(f"[Coordinator] Running LangGraph workflow for query: {task}")
+        initial_state = {
+            "query": task,
+            "planned_agents": [],
+            "agent_outputs": {},
+            "final_report": "",
+        }
+        # Run the graph synchronously
+        result = asyncio.run(cricketiq_graph.ainvoke(initial_state))
+        
+        # Print the agent outputs so that they can be captured by redirecting stdout (needed for Streamlit regex parsing)
+        for agent_name, output in result.get("agent_outputs", {}).items():
+            print(f"\n[{agent_name}] Running...")
+            print(output)
+            
+        return result["final_report"]

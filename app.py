@@ -140,7 +140,7 @@ if user_query:
                 old_stdout = sys.stdout
                 sys.stdout = buffer = io.StringIO()
                 
-                from agents.coordinator import CoordinatorAgent
+                from src.agents.coordinator import CoordinatorAgent
                 coordinator = CoordinatorAgent()
                 
                 # First, run the coordinator path once to trigger all sub-agents and fill the terminal buffer
